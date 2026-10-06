@@ -66,6 +66,10 @@ CMake 3.24 or later, PowerShell and Python. Place the pinned OpenXR SDK under
 `third_party/openxr-sdk` as described in [dependency pins](../third_party/VERSIONS.md). The curated
 export includes the small pinned MinHook/HDE source snapshot with its licence
 under `third_party/minhook`. OpenVR is optional for xrprobe.
+The adapter's DLSS support needs the pinned NVIDIA DLSS SDK: run
+`powershell -ExecutionPolicy Bypass -File tools/fetch-ngx.ps1` to place it under
+`third_party/ngx`, and ship its `nvngx_dlss.dll` in the release's `Native` folder.
+See [DLSS](DLSS.md).
 Keep upstream licences. Do not substitute different dependency bytes silently.
 
 From a Visual Studio x64 developer shell:

@@ -91,6 +91,9 @@ def parse_mods(value):
 # launch, and only a profile with nothing in it falls back to the shipped
 # default. Saved play mode applies to Host and Solo; a friend joining still gets the
 # flat screen unless they ask for --vr.
+DLSS_MODES = ("off", "dlaa", "quality", "balanced", "performance", "ultraperformance")
+
+
 def load_preferences(args):
     root = getattr(args, "profile_root", None) or profile_root()
     path = root / "launcher.json"
@@ -129,6 +132,14 @@ def load_preferences(args):
         args.portal_gun = saved.get("portal_gun", False) is True
     if getattr(args, "threaded_render", None) is None:
         args.threaded_render = saved.get("threaded_render", False) is True
+    if getattr(args, "dlss", None) is None:
+        mode = saved.get("dlss", "off")
+        args.dlss = mode if mode in DLSS_MODES else "off"
+    if getattr(args, "hide_bile_lens", None) is None:
+        args.hide_bile_lens = saved.get("hide_bile_lens", True) is not False
+    if getattr(args, "dlss_sharpness", None) is None:
+        value = saved.get("dlss_sharpness", 0)
+        args.dlss_sharpness = value if type(value) is int and 0 <= value <= 100 else 0
     if scenario or getattr(args, "solo", False):
         args.mods = []
         args.damage_popups = False
@@ -147,6 +158,20 @@ def load_preferences(args):
         raise ValueError("Saved test map players must be 0 or 6")
 
 
+def save_dlss_preferences(args):
+    # A join takes the host's match settings, but DLSS is the player's own.
+    root = getattr(args, "profile_root", None) or profile_root()
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "launcher.json"
+    saved = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    saved.update({"dlss": getattr(args, "dlss", None) or "off",
+                  "dlss_sharpness": int(getattr(args, "dlss_sharpness", None) or 0),
+                  "hide_bile_lens": getattr(args, "hide_bile_lens", True) is not False})
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(saved, indent=2), encoding="utf-8")
+    temporary.replace(path)
+
+
 def save_preferences(args):
     root = getattr(args, "profile_root", None) or profile_root()
     root.mkdir(parents=True, exist_ok=True)
@@ -162,6 +187,9 @@ def save_preferences(args):
         "game_length": getattr(args, "game_length", "short"),
         "vr_quality": getattr(args, "vr_quality", "performance"),
         "threaded_render": bool(getattr(args, "threaded_render", False)),
+        "dlss": getattr(args, "dlss", None) or "off",
+        "dlss_sharpness": int(getattr(args, "dlss_sharpness", None) or 0),
+        "hide_bile_lens": getattr(args, "hide_bile_lens", True) is not False,
         "breacher": bool(getattr(args, "breacher", False))})
     # Solo applies no hosted loadout. Remember its common choices without
     # erasing the mods and host settings the next hosted session will use.

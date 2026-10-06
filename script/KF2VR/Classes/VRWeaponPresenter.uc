@@ -362,7 +362,10 @@ simulated function bool SupportIsEngaged()
         && (NativeValidMask & (1 << PresentedItem.SupportHand)) != 0
         && (NativeGripActiveMask & (1 << PresentedItem.SupportHand)) != 0
         && AttachedHands[PresentedItem.SupportHand] != None
-        && SupportContactWithinReleaseRange()
+        // Support grip lock: once acquired at the foregrip, a held grip stays
+        // engaged (two-hand accuracy and pose) wherever the tracked support
+        // position drifts; it still needs a valid controller pose.
+        && HasValidSupportTracking()
         && (!RootBridge.bHoldSupportGrip || (Hands[PresentedItem.SupportHand].bGrip
             && (RootBridge.NativeGripMask & (1 << PresentedItem.SupportHand)) != 0));
 }

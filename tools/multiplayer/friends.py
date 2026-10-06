@@ -27,7 +27,7 @@ import game_install
 from workshop_map import MAP_NAME, ensure_map, add_map_path, receipt as map_receipt
 from launch_menu import (DIFFICULTIES, LENGTHS, host_url, installed_maps,
                          installed_solo_maps, resolve_solo_map, choose_options)
-from workshop_loadout import (parse_mods, load_preferences, save_preferences, prepare_content,
+from workshop_loadout import (parse_mods, load_preferences, save_preferences, save_dlss_preferences, prepare_content,
                               configure_content, configure_mod_settings, damage_popups_enabled, HEADSET_PRESETS)
 from session import digest, config_hashes, role_config, set_ini, read_ini, log_text, unreal_command, check_port
 from watchdog import api, creation_time
@@ -225,6 +225,13 @@ def role_environment(environment, role):
                 or type(percent) is not int or not 50 <= percent <= 100):
             raise ValueError("Eye resolution is valid only for the live VR driver, from 50 to 100 percent")
         result["KF2VR_EYE_RENDER_PERCENT"] = str(percent)
+    if role.get("role") == "driver" and role.get("native_adapter") and role.get("hide_bile_lens"):
+        result["KF2VR_HIDE_BILE_LENS"] = "1"
+    if role.get("dlss", "off") != "off" and role.get("role") == "driver" and role.get("native_adapter"):
+        # The adapter loads nvngx_dlss.dll from the release's native folder.
+        result["KF2VR_DLSS"] = role["dlss"]
+        result["KF2VR_NGX_DIR"] = str(ROOT / "Native")
+        result["KF2VR_DLSS_SHARPNESS"] = str(int(role.get("dlss_sharpness", 0)))
     result.update(promo_session.environment(role))
     result.update(motion_session.environment(role))
     return result
@@ -421,6 +428,9 @@ def configure_role(run, name, user, game, args):
                 # game thread ticks N+1. Replaces -onethread; no portals.
                 role["args"][role["args"].index("-onethread")] = "-kf2vr-threaded-render"
             role["native_adapter"] = True
+            role["dlss"] = getattr(args, "dlss", None) or "off"
+            role["dlss_sharpness"] = int(getattr(args, "dlss_sharpness", None) or 0)
+            role["hide_bile_lens"] = getattr(args, "hide_bile_lens", True) is not False
             requested_percent = getattr(args, "eye_render_percent", None)
             role["eye_render_percent"] = import_preferences(configs, eye_percent=requested_percent,
                                                             root=getattr(args, "profile_root", None))
@@ -495,6 +505,12 @@ def parse_options(argv=None):
                         help="This live VR session: log highlight hit/kill events and F9 video sync marks; initially OFF")
     parser.add_argument("--record-motion", action=argparse.BooleanOptionalAction, default=False,
                         help="This live VR session: record player headset/controllers/input and presentation locally; initially OFF")
+    parser.add_argument("--dlss", choices=("off", "dlaa", "quality", "balanced", "performance", "ultraperformance"), default=None,
+                        help="NVIDIA DLSS for the headset image (saved, initially off); requires --vr")
+    parser.add_argument("--hide-bile-lens", action=argparse.BooleanOptionalAction, default=None,
+                        help="VR: skip the Bloat bile screen splatter particles, a large GPU cost (saved, initially on)")
+    parser.add_argument("--dlss-sharpness", type=int, default=None,
+                        help="Sharpening after DLSS, 0 (off) to 100 (saved, initially 0)")
     parser.add_argument("--threaded-render", action=argparse.BooleanOptionalAction, default=None,
                         help="Experimental: render on UE3's render thread instead of -onethread (saved, initially off). "
                              "The portal gun's see-through view works only with this off; requires --vr")
@@ -574,6 +590,10 @@ def parse_options(argv=None):
         parser.error("--headset-preset, --vr-quality and --eye-render-percent require VR play; omit --desktop")
     if args.frame_timings and not args.vr:
         parser.error("--frame-timings requires --vr")
+    if getattr(args, "dlss", None) not in (None, "off") and not args.vr:
+        parser.error("--dlss requires --vr")
+    if args.dlss_sharpness is not None and not 0 <= args.dlss_sharpness <= 100:
+        parser.error("--dlss-sharpness must be from 0 to 100")
     if args.threaded_render and not args.vr:
         parser.error("--threaded-render requires --vr")
     if (args.eye_render_percent is not None and not args.vr
@@ -724,6 +744,8 @@ def main():
     # loadout when Solo's effective content selection is empty.
     if (args.host or args.solo) and not args.replay_teammate:
         save_preferences(args)
+    elif args.vr and not args.replay_teammate:
+        save_dlss_preferences(args)
     record = {"launcher_pid": os.getpid(), "launcher_creation_time": creation_time(api(), ctypes.windll.kernel32.GetCurrentProcess()),
               "build_id": manifest.get("build_id", ROOT.name), "protocol_version": manifest.get("protocol_version"),
               "session_mode": "solo" if args.solo else ("host" if args.host else "join"),

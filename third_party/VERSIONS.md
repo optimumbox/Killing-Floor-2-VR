@@ -7,6 +7,7 @@ upstream licences. The adapter uses OpenXR. OpenVR is optional for xrprobe.
 | --- | --- | --- |
 | OpenXR-SDK | release-1.1.63, f2448a8 | https://github.com/KhronosGroup/OpenXR-SDK |
 | OpenVR | v2.15.6, 0924064 | https://github.com/ValveSoftware/openvr |
+| NVIDIA DLSS (NGX) SDK | v310.7.0, a291cc7; nvngx_dlss.dll SHA-256 BE6E434A...6EE6E (`tools/fetch-ngx.ps1`) | https://github.com/NVIDIA/DLSS |
 | CPython portable player runtime | 3.14.3; archive SHA-256 in tools/dependency-pins.json | https://www.python.org/ |
 
 The build uses OpenXR-SDK with pre-generated headers, not OpenXR-SDK-Source.

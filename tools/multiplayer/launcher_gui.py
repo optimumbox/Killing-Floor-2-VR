@@ -391,12 +391,27 @@ class Launcher(tk.Tk):
 
     def footer(self, frame, back=True, start=None, start_text="Start"):
         row = tk.Frame(frame, bg=INK)
-        row.pack(side="bottom", fill="x", pady=(self.px(14), 0))
+        # Pack ahead of the screen's content so Back/Start keep their space
+        # when a long page (VR headset options) outgrows the window.
+        content = frame.pack_slaves()
+        row.pack(side="bottom", fill="x", pady=(self.px(14), 0), **({"before": content[0]} if content else {}))
         if back:
             self.button(row, "Back", self.home).pack(side="left")
         if start:
             self.button(row, start_text, start, primary=True).pack(side="right")
+        self.after_idle(self.fit_window)
         return row
+
+    def fit_window(self):
+        # Grow (never shrink) to the page's requested height, within the screen.
+        try:
+            self.update_idletasks()
+            need, have = self.winfo_reqheight(), self.winfo_height()
+            if need > have:
+                limit = self.winfo_screenheight() - self.px(80)
+                self.geometry(f"{self.winfo_width()}x{min(need, limit)}")
+        except tk.TclError:
+            pass
 
     def form(self, frame):
         grid = tk.Frame(frame, bg=INK)
@@ -412,6 +427,37 @@ class Launcher(tk.Tk):
         box.set(labels.get(value, next(iter(labels.values()))))
         box.grid(row=row, column=1, sticky="w", pady=self.px(3))
         fields[label] = (box, labels)
+
+    def dlss_controls(self, grid, fields):
+        # DLSS mode and sharpening, shared by Play solo, Host and Join.
+        self.combo(grid, fields, "DLSS", {"off": "Off", "dlaa": "DLAA (full resolution)", "quality": "Quality",
+                                          "balanced": "Balanced", "performance": "Performance",
+                                          "ultraperformance": "Ultra Performance"},
+                   getattr(self.saved, "dlss", None) or "off")
+        row = len(fields)
+        self.label(grid, "DLSS SHARPNESS", "label", DIM).grid(row=row, column=0, sticky="w", pady=self.px(3))
+        slider = tk.Frame(grid, bg=INK)
+        slider.grid(row=row, column=1, sticky="w", pady=self.px(3))
+        self.dlss_sharpness = tk.IntVar(value=int(getattr(self.saved, "dlss_sharpness", None) or 0))
+        shown = self.label(slider, "", "body")
+        def show(value=None):
+            amount = int(round(float(value if value is not None else self.dlss_sharpness.get())))
+            self.dlss_sharpness.set(amount)
+            shown.config(text=f"{amount}" + ("  (off)" if amount == 0 else ""))
+        ttk.Scale(slider, from_=0, to=100, orient="horizontal", length=self.px(240),
+                  variable=self.dlss_sharpness, command=show).pack(side="left")
+        shown.pack(side="left", padx=(self.px(10), 0))
+        show()
+        fields["DLSS sharpness"] = (None, {})
+        row = len(fields)
+        self.hide_bile_lens = tk.BooleanVar(value=getattr(self.saved, "hide_bile_lens", True) is not False)
+        ttk.Checkbutton(grid, text="Hide Bloat bile screen splatter (large GPU saving)",
+                        variable=self.hide_bile_lens).grid(row=row, column=1, sticky="w", pady=self.px(3))
+        fields["Bile lens"] = (None, {})
+
+    def dlss_arguments(self, fields):
+        return ["--dlss", self.pick(fields, "DLSS"), "--dlss-sharpness", str(int(self.dlss_sharpness.get())),
+                "--hide-bile-lens" if self.hide_bile_lens.get() else "--no-hide-bile-lens"]
 
     @staticmethod
     def pick(fields, label):
@@ -559,6 +605,7 @@ class Launcher(tk.Tk):
             self.combo(grid, fields, "Graphics", QUALITY_LABELS, self.saved.vr_quality)
             scale = f"{self.saved.eye_render_percent}%" if self.saved.eye_render_percent is not None else SCALES[0]
             self.combo(grid, fields, "Render scale", {s: s for s in [*SCALES, scale]}, scale)
+            self.dlss_controls(grid, fields)
             self.label(frame, "Shared with Settings and in-game VR Controls > Graphics.",
                        "small", DIM, wraplength=self.px(600)).pack(anchor="w")
         extras = {}
@@ -616,6 +663,7 @@ class Launcher(tk.Tk):
                 if pick("Render scale") != SCALES[0]:
                     arguments += ["--eye-render-percent", pick("Render scale").rstrip("%")]
                 arguments.append("--threaded-render" if extras["threaded"].get() else "--no-threaded-render")
+                arguments += self.dlss_arguments(fields)
             if not solo:
                 arguments.append("--multiplayer-grabs" if extras["grabs"].get() else "--no-multiplayer-grabs")
                 arguments.append("--inventory-focus" if extras["focus"].get() else "--no-inventory-focus")
@@ -658,6 +706,10 @@ class Launcher(tk.Tk):
             except tk.TclError:
                 messagebox.showinfo("Nothing copied", "Copy the code from your friend's message first.")
         self.button(row, "Paste code", paste, small=True).pack(side="left")
+        headset = {}
+        if self.vr.get():
+            self.section(frame, "Headset")
+            self.dlss_controls(self.form(frame), headset)
         address, password = tk.StringVar(), tk.StringVar()
         manual = tk.Frame(frame, bg=INK)
 
@@ -687,6 +739,8 @@ class Launcher(tk.Tk):
             else:
                 messagebox.showwarning("Check the code", "Paste the whole code from your friend. It starts with KF2VR1:")
                 return
+            if self.vr.get():
+                arguments += self.dlss_arguments(headset)
             self.run(arguments, "Joining")
 
         self.footer(frame, start=start, start_text="Join")

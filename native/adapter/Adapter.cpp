@@ -31,6 +31,7 @@
 #include "AtlasBlit.h"
 #include "LoadingPlate.h"
 #include "StereoViews.h"
+#include "Dlss.h"
 #include "XrGamepad.h"
 #include "HeadAim.h"
 #include "WeaponHaptics.h"
@@ -104,6 +105,16 @@ namespace xr=kf2vr::xr;
 namespace adapter=kf2vr::adapter;
 namespace menuNative=kf2vr::adapter::menu_native;
 adapter::RenderCommandQueue renderQueue;
+// DLSS Super Resolution (KF2VR_DLSS). Configured once at startup; the game
+// thread sizes and jitters each eye pass, eye snapshot commands evaluate it.
+adapter::DlssUpscaler dlss;
+std::uint32_t dlssPhase=0;            // Game thread: one jitter phase per stereo pair.
+adapter::DlssJitter dlssJitter{};     // Game thread: this pair's sample offset.
+std::uint64_t dlssSkips=0,dlssFailures=0,dlssFrames=0;
+// KF2VR_HIDE_BILE_LENS=1: skip the Bloat bile camera-lens particles, a
+// full-view translucent emitter whose overdraw is very costly per VR eye.
+bool hideBileLens=false;
+std::uint64_t bileLensSkipped=0;
 // Everything Present needs from the game side for one frame. The game thread
 // fills it after the frame's last draw and hands it over through renderQueue,
 // so it reaches the render side in draw order and Present never reads script.
@@ -125,6 +136,8 @@ struct RenderSide {
     std::uint64_t begunSample=0;
     std::array<bool,2> eyeCopied{};
     bool fault=false; // A command for the next packet failed.
+    ComPtr<ID3D11Texture2D> sceneDepth; // DLSS: the HDR scene's depth target, as last bound.
+    std::array<ComPtr<ID3D11Texture2D>,2> dlssOutput; // DLSS: per-eye output-size images.
 };
 // The game thread owns the rest, except the fields marked atomic; -onethread
 // makes both sides one thread. Deliberately no global destructor calls into
@@ -254,6 +267,25 @@ adapter::ForegroundDepth foregroundDepth;
 std::vector<adapter::ForegroundDepth> foregroundDepthStack;
 adapter::HudTextAlpha hudTextAlpha;
 bool OnRenderCommandThread() { return GetCurrentThreadId()==renderQueue.ExecutingThread(); }
+// HUD alpha repair runs wherever UE3 executes render commands: under threaded
+// rendering that is the thread that drains the ring, even before (or between)
+// this adapter's own commands updating the executing thread.
+bool OnHudRenderThread() {
+    const DWORD current=GetCurrentThreadId();
+    return current==renderQueue.ExecutingThread() || (renderQueue.Threaded() && current==renderQueue.DrainingThread());
+}
+std::uint64_t hudAlphaFallbacks=0,hudClearsOffThread=0,hudTraceClears=0,hudTraceBinds=0,hudLoggedClaims=0;
+// One-time trace of how HUD-size targets are cleared and bound (threaded only).
+bool HudSizeTarget(ID3D11RenderTargetView* view,D3D11_TEXTURE2D_DESC& d) {
+    if(!view) return false;
+    ComPtr<ID3D11Resource> resource;view->GetResource(&resource);
+    ComPtr<ID3D11Texture2D> texture;if(FAILED(resource.As(&texture))) return false;
+    texture->GetDesc(&d);
+    if(d.Width==768 && d.Height==768) return true;
+    for(unsigned i=0;i<adapter::HudTextAlpha::PanelCount;++i)
+        if(d.Width==adapter::HudTextAlpha::PanelWidth[i] && d.Height==adapter::HudTextAlpha::PanelHeight[i]) return true;
+    return false;
+}
 using ClearColor=void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*,ID3D11RenderTargetView*,const FLOAT*);
 using SetTargets=void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*,UINT,ID3D11RenderTargetView* const*,ID3D11DepthStencilView*);
 using DrawIndexed=void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*,UINT,UINT,INT);
@@ -894,6 +926,25 @@ void HookProcessInternal(void* object,void* stack,void* result) {
     if (callback==Callback::Unrelated) {
         ForwardProcessInternal(object,stack,result); return;
     }
+    if (callback==Callback::AddCameraLensEffect && hideBileLens) {
+        // The only parameter is the lens emitter class.
+        auto* lensLocals=adapter::GameScript::At<void*>(stack,0x2c);
+        void* lens=lensLocals ? adapter::GameScript::At<void*>(lensLocals,0) : nullptr;
+        bool bile=false;
+        if (lens && adapter::GameScript::ObjectName(adapter::GameScript::ObjectClass(lens))==script.Intern(L"Class")) {
+            const auto puke=script.Intern(L"KFCameraLensEmit_Puke"),light=script.Intern(L"KFCameraLensEmit_Puke_Light");
+            void* type=lens;
+            for (unsigned depth=0;type && depth<64 && !bile;++depth,type=adapter::GameScript::SuperStruct(type)) {
+                const auto name=adapter::GameScript::ObjectName(type);
+                bile=name==puke || name==light;
+            }
+        }
+        if (bile) {
+            if (Interesting(++bileLensSkipped)) Log("Bloat bile lens effect skipped count=%llu",
+                static_cast<unsigned long long>(bileLensSkipped));
+            return;
+        }
+    }
     if (portalRequested && callback==Callback::NativePortalShotsUpdate &&
         script.IsClass(object,L"VRWeap_PortalGun") &&
         script.FindFunction(object,L"NativePortalShotsUpdate")==function)
@@ -929,13 +980,17 @@ void HookProcessInternal(void* object,void* stack,void* result) {
             // The panel's clear is already queued and its draws follow this
             // callback, so registration lands between them on the render side.
             renderQueue.Enqueue([=] {
+                hudTextAlpha.allowRecent=renderQueue.Threaded();
                 const bool registered=panel ? hudTextAlpha.RegisterPanel(index,owner,expected,width,height) :
                     hudTextAlpha.RegisterSelector(index,owner,expected,width,height);
                 if(selectorDiagnostics && !panel && selectorRegistrations++<16)
                     Log("KF2VR_SELECTOR_REGISTER hand=%d owner=%p expected=%p canvas=%.0fx%.0f registered=%d",
                         index,owner,expected,width,height,registered);
-                if (Interesting(++hudAlphaTargets)) Log("HUD text alpha target=%llu registered=%d kind=%s slot=%d",
-                    static_cast<unsigned long long>(hudAlphaTargets),registered,panel?"panel":"selector",slot);
+                if (Interesting(++hudAlphaTargets)) Log("HUD text alpha target=%llu registered=%d kind=%s slot=%d reason=%s",
+                    static_cast<unsigned long long>(hudAlphaTargets),registered,panel?"panel":"selector",slot,hudTextAlpha.lastReason);
+                if (hudTextAlpha.lastFallback && hudAlphaFallbacks++<12)
+                    Log("HUD text alpha fallback registration kind=%s slot=%d reason=%s threaded=%d",
+                        panel?"panel":"selector",slot,hudTextAlpha.lastReason,renderQueue.Threaded()?1:0);
             });
         }
     }
@@ -1230,8 +1285,14 @@ void HookPhysicalStart(void* object,void* stack,void* result) {
 void EnsureEyeResolution() {
     auto* viewport=lastLocalViewport;
     if (!Readable(viewport,0xbc)) return;
-    const unsigned width=adapter::ScaledEyeExtent(demo->backend.RecommendedWidth(),eyeRenderPercent);
-    const unsigned height=adapter::ScaledEyeExtent(demo->backend.RecommendedHeight(),eyeRenderPercent);
+    unsigned width=adapter::ScaledEyeExtent(demo->backend.RecommendedWidth(),eyeRenderPercent);
+    unsigned height=adapter::ScaledEyeExtent(demo->backend.RecommendedHeight(),eyeRenderPercent);
+    // DLSS renders each eye at its mode's input size; the output keeps the
+    // render-scale size. A failed DLSS returns here to ordinary sizing.
+    if (dlss.Active()) {
+        width=adapter::DlssRenderExtent(width,dlss.Mode());
+        height=adapter::DlssRenderExtent(height,dlss.Mode());
+    }
     if (!width || !height) return;
     unsigned currentWidth=0,currentHeight=0;
     std::memcpy(&currentWidth,static_cast<std::byte*>(viewport)+0xb4,4);
@@ -1252,8 +1313,9 @@ void EnsureEyeResolution() {
         resize(static_cast<std::byte*>(viewport)-8,currentWidth,currentHeight,0,0,0);
         demo->failed=true; demo->gamepad.Cancel(); return;
     }
-    Log("Eye render target resized=%ux%u runtimeRecommended=%d eyeRenderPercent=%u xrOutput=%ux%u desktop window unchanged",
-        width,height,eyeRenderPercent==100,eyeRenderPercent,demo->backend.RecommendedWidth(),demo->backend.RecommendedHeight());
+    Log("Eye render target resized=%ux%u runtimeRecommended=%d eyeRenderPercent=%u xrOutput=%ux%u dlss=%s desktop window unchanged",
+        width,height,eyeRenderPercent==100,eyeRenderPercent,demo->backend.RecommendedWidth(),demo->backend.RecommendedHeight(),
+        dlss.Active()?adapter::DlssModeName(dlss.Mode()):"Off");
 }
 bool RefreshMenuState();
 void PumpNativeInput(float delta,bool neutral=false) {
@@ -2181,6 +2243,14 @@ void HookSubmit(void* canvas,void* family) {
                         }
                     }
                     demo->stereo.SetSingleViewDiagnostic(true,demo->eyePass==1?1:0);
+                    // DLSS: both eyes of a pair share one jitter phase.
+                    if (dlss.Active()) {
+                        if (demo->eyePass!=1) {
+                            const unsigned output=adapter::ScaledEyeExtent(demo->backend.RecommendedWidth(),eyeRenderPercent);
+                            dlssJitter=adapter::DlssJitterForPhase(++dlssPhase,demo->width.load(),output);
+                        }
+                        demo->stereo.SetJitter(dlssJitter.x,dlssJitter.y);
+                    } else { dlssJitter={}; demo->stereo.SetJitter(0,0); }
                     if (demo->gpuTimingReady && demo->eyePass==0 && !demo->menuFrame && aimReady &&
                         demo->frame.shouldRender && demo->frame.viewsValid && demo->frame.poseSampleId%30==0) {
                         renderQueue.Enqueue([sample=demo->frame.poseSampleId,width=demo->width.load(),height=demo->height.load()] {
@@ -2217,7 +2287,7 @@ void HookSubmit(void* canvas,void* family) {
     finalizePresentation();
     originalSubmit(canvas,family);
 }
-bool SnapshotEye(unsigned eye) {
+bool SnapshotEye(unsigned eye,const adapter::DlssEyeInput& dlssInput={},unsigned dlssWidth=0,unsigned dlssHeight=0) {
     adapter::timing::Scope timing(adapter::timing::EyeCopy);
     if (!demo->ready) return false; // Queued before a stop that released the device.
     auto* swapchain=demo->ownerSwapchain.load(std::memory_order_acquire);
@@ -2244,10 +2314,16 @@ bool SnapshotEye(unsigned eye) {
         storageFormat=DXGI_FORMAT_B8G8R8X8_TYPELESS; viewFormat=DXGI_FORMAT_B8G8R8X8_UNORM_SRGB; break;
     default: return false;
     }
+    // DLSS writes each eye at the output size; otherwise the eye is copied as rendered.
+    const bool upscale=dlssInput.valid && dlssWidth && dlssHeight && dlss.Active() && demo->render.sceneDepth &&
+        dlssWidth<=8192 && dlssHeight<=8192;
+    if (dlssInput.valid && dlss.Active() && !demo->render.sceneDepth && Interesting(++dlssSkips))
+        Log("DLSS skipped=%llu: scene depth target not observed",static_cast<unsigned long long>(dlssSkips));
+    const unsigned eyeWidth=upscale ? dlssWidth : sourceDesc.Width, eyeHeight=upscale ? dlssHeight : sourceDesc.Height;
     D3D11_TEXTURE2D_DESC atlasDesc{};
     if (demo->eyeAtlas) demo->eyeAtlas->GetDesc(&atlasDesc);
-    if (!demo->eyeAtlas || !demo->eyeAtlasView || atlasDesc.Width!=sourceDesc.Width*2 || atlasDesc.Height!=sourceDesc.Height || atlasDesc.Format!=storageFormat) {
-        atlasDesc=sourceDesc; atlasDesc.Width*=2; atlasDesc.MipLevels=1; atlasDesc.ArraySize=1;
+    if (!demo->eyeAtlas || !demo->eyeAtlasView || atlasDesc.Width!=eyeWidth*2 || atlasDesc.Height!=eyeHeight || atlasDesc.Format!=storageFormat) {
+        atlasDesc=sourceDesc; atlasDesc.Width=eyeWidth*2; atlasDesc.Height=eyeHeight; atlasDesc.MipLevels=1; atlasDesc.ArraySize=1;
         atlasDesc.Format=storageFormat; atlasDesc.SampleDesc={1,0};
         atlasDesc.Usage=D3D11_USAGE_DEFAULT; atlasDesc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
         atlasDesc.CPUAccessFlags=0; atlasDesc.MiscFlags=0;
@@ -2260,13 +2336,60 @@ bool SnapshotEye(unsigned eye) {
         demo->eyeAtlasView=view;
         demo->eyeAtlas=atlas;
     }
+    if (upscale) {
+        auto& output=demo->render.dlssOutput[eye];
+        D3D11_TEXTURE2D_DESC outputDesc{};
+        if (output) output->GetDesc(&outputDesc);
+        DXGI_FORMAT unorm=storageFormat==DXGI_FORMAT_R8G8B8A8_TYPELESS ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_B8G8R8A8_UNORM;
+        if (storageFormat==DXGI_FORMAT_B8G8R8X8_TYPELESS) unorm=DXGI_FORMAT_UNKNOWN; // No typed UAV store.
+        if (unorm!=DXGI_FORMAT_UNKNOWN && (!output || outputDesc.Width!=dlssWidth || outputDesc.Height!=dlssHeight || outputDesc.Format!=unorm)) {
+            outputDesc={}; outputDesc.Width=dlssWidth; outputDesc.Height=dlssHeight; outputDesc.MipLevels=1; outputDesc.ArraySize=1;
+            outputDesc.Format=unorm; outputDesc.SampleDesc={1,0}; outputDesc.Usage=D3D11_USAGE_DEFAULT;
+            outputDesc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
+            output.Reset();
+            if (FAILED(demo->backend.Device()->CreateTexture2D(&outputDesc,nullptr,&output))) output.Reset();
+        }
+        std::string error;
+        if (unorm==DXGI_FORMAT_UNKNOWN) error="eye image format has no DLSS output format";
+        else if (!output) error="DLSS output texture could not be created";
+        if (error.empty() && dlss.Evaluate(demo->backend.Device(),demo->backend.Context(),eye,source.Get(),
+                demo->render.sceneDepth.Get(),output.Get(),dlssInput,error)) {
+            demo->backend.Context()->CopySubresourceRegion(demo->eyeAtlas.Get(),0,eye*dlssWidth,0,0,output.Get(),0,nullptr);
+            if (eye==1 && Interesting(++dlssFrames))
+                Log("DLSS frames=%llu mode=%s render=%ux%u output=%ux%u jitter=%.3f,%.3f",static_cast<unsigned long long>(dlssFrames),
+                    adapter::DlssModeName(dlss.Mode()),dlssInput.renderWidth,dlssInput.renderHeight,dlssWidth,dlssHeight,
+                    dlssInput.jitter.x,dlssInput.jitter.y);
+            return SUCCEEDED(demo->backend.Device()->GetDeviceRemovedReason());
+        }
+        if (Interesting(++dlssFailures)) Log("DLSS evaluate failed=%llu active=%d: %s",static_cast<unsigned long long>(dlssFailures),
+            dlss.Active()?1:0,error.c_str());
+        // This eye still needs an image: show it as rendered in the output-size
+        // atlas (top-left); the game thread returns to ordinary sizing if DLSS failed.
+        if (sourceDesc.Width>dlssWidth || sourceDesc.Height>dlssHeight) return false;
+        demo->backend.Context()->CopySubresourceRegion(demo->eyeAtlas.Get(),0,eye*dlssWidth,0,0,source.Get(),0,nullptr);
+        return SUCCEEDED(demo->backend.Device()->GetDeviceRemovedReason());
+    }
     demo->backend.Context()->CopySubresourceRegion(demo->eyeAtlas.Get(),0,eye*sourceDesc.Width,0,0,source.Get(),0,nullptr);
     return SUCCEEDED(demo->backend.Device()->GetDeviceRemovedReason());
 }
 // The copy follows the eye's own draw commands; Present checks the result.
 void QueueEyeSnapshot(unsigned eye) {
-    renderQueue.Enqueue([eye] {
-        demo->render.eyeCopied[eye]=SnapshotEye(eye);
+    // DLSS input is this eye's own submission: unjittered matrices, the pair's
+    // jitter and the rendered rectangle, captured on the game thread.
+    adapter::DlssEyeInput input;
+    unsigned outputWidth=0,outputHeight=0;
+    const auto& rect=demo->stereo.LastAtlas().left;
+    if (dlss.Active() && demo->stereo.LastSubmittedValid() && rect.x==0 && rect.y==0 && rect.width && rect.height) {
+        input.view=demo->stereo.LastSubmitted().view;
+        input.projection=demo->stereo.LastSubmitted().projection;
+        input.jitter=dlssJitter;
+        input.renderWidth=rect.width; input.renderHeight=rect.height;
+        input.valid=true;
+        outputWidth=adapter::ScaledEyeExtent(demo->backend.RecommendedWidth(),eyeRenderPercent);
+        outputHeight=adapter::ScaledEyeExtent(demo->backend.RecommendedHeight(),eyeRenderPercent);
+    }
+    renderQueue.Enqueue([eye,input,outputWidth,outputHeight] {
+        demo->render.eyeCopied[eye]=SnapshotEye(eye,input,outputWidth,outputHeight);
         if (!demo->render.eyeCopied[eye]) Log("Eye snapshot failed: %s",eye?"right":"left");
     });
 }
@@ -2585,6 +2708,8 @@ void StopDemoRuntime() {
     demo->blit.Shutdown();
     demo->eyeAtlasView.Reset();
     demo->eyeAtlas.Reset();
+    demo->render.sceneDepth.Reset(); demo->render.dlssOutput={};
+    dlss.Shutdown();
     demo->backend.Shutdown(); demo->ready=false;
     // Keep the virtual pad connected but neutral to balance held input release.
     Log("XR shutdown completed; virtual gamepad neutral; stock scene submission restored");
@@ -3019,6 +3144,7 @@ HRESULT STDMETHODCALLTYPE HookResize(IDXGISwapChain* swapchain,UINT count,UINT w
         demo->blit.OnResize();
         demo->eyeAtlasView.Reset();
         demo->eyeAtlas.Reset();
+        dlss.Reset(); demo->render.sceneDepth.Reset();
         demo->gamepad.Cancel();
         // A frame built for the old surface can never sample the resized one.
         // No eye image has been rendered before Present, so this ends zero layers.
@@ -3048,19 +3174,65 @@ void STDMETHODCALLTYPE HookClearDepth(ID3D11DeviceContext* context,ID3D11DepthSt
     originalClearDepth(context,view,flags,depth,stencil);
 }
 void STDMETHODCALLTYPE HookClearColor(ID3D11DeviceContext* context,ID3D11RenderTargetView* view,const FLOAT* rgba) {
-    if (OnRenderCommandThread()) {
+    if (!OnHudRenderThread() && rgba && rgba[0]==0 && rgba[1]==0 && rgba[2]==0 && rgba[3]==0 && view &&
+        Interesting(++hudClearsOffThread))
+        Log("HUD transparent clear outside render command thread count=%llu thread=%lu executing=%lu draining=%lu",
+            static_cast<unsigned long long>(hudClearsOffThread),GetCurrentThreadId(),renderQueue.ExecutingThread(),
+            renderQueue.DrainingThread());
+    if (OnHudRenderThread()) {
+        if (renderQueue.Threaded() && hudTraceClears<24 && rgba) {
+            D3D11_TEXTURE2D_DESC d{};
+            if (HudSizeTarget(view,d)) {
+                ComPtr<ID3D11Resource> r;view->GetResource(&r);
+                Log("HUD trace clear=%llu target=%p size=%ux%u format=%u rgba=%.3f,%.3f,%.3f,%.3f",
+                    static_cast<unsigned long long>(++hudTraceClears),r.Get(),d.Width,d.Height,d.Format,rgba[0],rgba[1],rgba[2],rgba[3]);
+            }
+        }
         if(selectorDiagnostics && selectorClears<64) TraceSelectorTarget(context,view,"clear",false,rgba);
         hudTextAlpha.Clear(context,view,rgba);
     }
     originalClearColor(context,view,rgba);
 }
+// DLSS: remember the depth target bound with the HDR scene colour (world and
+// foreground passes) at least as large as the eye image.
+void NoteSceneDepth(UINT count,ID3D11RenderTargetView* const* targets,ID3D11DepthStencilView* depth) {
+    static ID3D11DepthStencilView* lastView=nullptr;
+    if (!depth || count<1 || !targets || !targets[0]) return;
+    if (depth==lastView && demo->render.sceneDepth) return;
+    ComPtr<ID3D11Resource> colorResource,depthResource;
+    targets[0]->GetResource(&colorResource); depth->GetResource(&depthResource);
+    ComPtr<ID3D11Texture2D> colorTexture,depthTexture;
+    if (FAILED(colorResource.As(&colorTexture)) || FAILED(depthResource.As(&depthTexture))) return;
+    D3D11_TEXTURE2D_DESC c{},d{}; colorTexture->GetDesc(&c); depthTexture->GetDesc(&d);
+    if (c.Format!=DXGI_FORMAT_R16G16B16A16_FLOAT || c.SampleDesc.Count!=1 || d.SampleDesc.Count!=1) return;
+    if (d.Format!=DXGI_FORMAT_R24G8_TYPELESS && d.Format!=DXGI_FORMAT_D24_UNORM_S8_UINT) return;
+    if (d.Width<demo->width.load() || d.Height<demo->height.load()) return;
+    lastView=depth;
+    demo->render.sceneDepth=depthTexture;
+}
 void STDMETHODCALLTYPE HookSetTargets(ID3D11DeviceContext* context,UINT count,ID3D11RenderTargetView* const* targets,ID3D11DepthStencilView* depth) {
-    if (OnRenderCommandThread()) hudTextAlpha.Targets(context,count,targets);
+    if (OnHudRenderThread()) {
+        if (renderQueue.Threaded() && hudTraceBinds<24 && count>=1 && targets && targets[0]) {
+            D3D11_TEXTURE2D_DESC d{};
+            if (HudSizeTarget(targets[0],d)) {
+                ComPtr<ID3D11Resource> r;targets[0]->GetResource(&r);
+                Log("HUD trace bind=%llu target=%p size=%ux%u format=%u",static_cast<unsigned long long>(++hudTraceBinds),
+                    r.Get(),d.Width,d.Height,d.Format);
+            }
+        }
+        hudTextAlpha.Targets(context,count,targets);
+        if (hudTextAlpha.boundClaims>hudLoggedClaims && hudLoggedClaims<16) {
+            hudLoggedClaims=hudTextAlpha.boundClaims;
+            Log("HUD text alpha bind-time registration claims=%llu slot=%u",
+                static_cast<unsigned long long>(hudTextAlpha.boundClaims),hudTextAlpha.lastClaimIndex);
+        }
+        if (demo && dlss.Active()) NoteSceneDepth(count,targets,depth);
+    }
     originalSetTargets(context,count,targets,depth);
 }
 void STDMETHODCALLTYPE HookDrawIndexed(ID3D11DeviceContext* context,UINT count,UINT start,INT base) {
     adapter::HudTextAlpha::DrawScope alpha;
-    if (OnRenderCommandThread()) {
+    if (OnHudRenderThread()) {
         hudTextAlpha.BeforeDraw(context,alpha);
         if(selectorDiagnostics && selectorDraws<64) {
             ComPtr<ID3D11RenderTargetView> target;context->OMGetRenderTargets(1,&target,nullptr);
@@ -3077,7 +3249,7 @@ void STDMETHODCALLTYPE HookDrawIndexed(ID3D11DeviceContext* context,UINT count,U
 // contribute coverage to a transparent selector surface.
 void STDMETHODCALLTYPE HookDraw(ID3D11DeviceContext* context,UINT count,UINT start) {
     adapter::HudTextAlpha::DrawScope alpha;
-    if(OnRenderCommandThread()) {
+    if(OnHudRenderThread()) {
         hudTextAlpha.BeforeDraw(context,alpha);
         if(selectorDiagnostics && selectorDraws<64) {
             ComPtr<ID3D11RenderTargetView> target;context->OMGetRenderTargets(1,&target,nullptr);
@@ -3241,6 +3413,44 @@ DWORD WINAPI AdapterMain(void* parameter) {
     const auto percentLength=GetEnvironmentVariableW(L"KF2VR_EYE_RENDER_PERCENT",percentText,16);
     if (percentLength && (percentLength>=16 || !adapter::ParseEyeRenderPercent(percentText,eyeRenderPercent))) {
         Log("Eye render percentage refused: expected an integer from 50 to 100");return 5;
+    }
+    {
+        wchar_t modeText[32]{};
+        const auto modeLength=GetEnvironmentVariableW(L"KF2VR_DLSS",modeText,32);
+        adapter::DlssMode mode=adapter::DlssMode::Off;
+        if (modeLength && (modeLength>=32 || !adapter::ParseDlssMode(modeText,mode))) {
+            Log("DLSS mode refused: expected off, dlaa, quality, balanced, performance or ultraperformance");
+            mode=adapter::DlssMode::Off;
+        }
+        std::wstring ngxDirectory,dataDirectory;
+        if (mode!=adapter::DlssMode::Off) {
+            wchar_t text[1024]{};
+            const auto length=GetEnvironmentVariableW(L"KF2VR_NGX_DIR",text,1024);
+            if (length && length<1024) ngxDirectory=text;
+            wchar_t local[MAX_PATH]{};
+            const auto localLength=GetEnvironmentVariableW(L"LOCALAPPDATA",local,MAX_PATH);
+            if (localLength && localLength<MAX_PATH) {
+                dataDirectory=std::wstring(local)+L"\\KF2VR";
+                CreateDirectoryW(dataDirectory.c_str(),nullptr);
+                dataDirectory+=L"\\ngx";
+                CreateDirectoryW(dataDirectory.c_str(),nullptr);
+            }
+        }
+        dlss.Configure(mode,ngxDirectory,dataDirectory);
+        wchar_t sharpText[8]{};
+        const auto sharpLength=GetEnvironmentVariableW(L"KF2VR_DLSS_SHARPNESS",sharpText,8);
+        if (sharpLength && sharpLength<8) {
+            wchar_t* end=nullptr;
+            const long value=std::wcstol(sharpText,&end,10);
+            if (end && *end==0 && value>=0 && value<=100) dlss.SetSharpness(static_cast<float>(value)/100.0f);
+            else Log("DLSS sharpness refused: expected an integer from 0 to 100");
+        }
+        Log("DLSS revision=2 mode=%s sharpness=%.2f ngxDirectory=%ls",adapter::DlssModeName(mode),dlss.Sharpness(),
+            ngxDirectory.c_str());
+        wchar_t bileText[4]{};
+        const auto bileLength=GetEnvironmentVariableW(L"KF2VR_HIDE_BILE_LENS",bileText,4);
+        hideBileLens=bileLength==1 && bileText[0]==L'1';
+        Log("BileLens revision=1 hidden=%d",hideBileLens?1:0);
     }
     Log("RenderPerformance eyeRenderPercent=%u frameTimings=%d vmTimings=%d",eyeRenderPercent,
         adapter::timing::enabled,adapter::timing::scriptEnabled);

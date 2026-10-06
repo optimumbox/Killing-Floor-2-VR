@@ -879,11 +879,15 @@ function Update(float DeltaTime)
     // Late placement may deny support accuracy, but only this simulation step
     // releases ownership. Missing/invalid tracking suspends the contact rather
     // than manufacturing a release from an unavailable controller sample.
+    // Support grip lock: a support contact acquired at the foregrip is never
+    // released for distance. Physical stocks occlude the support controller
+    // and its drifting position must not drop the gun; only releasing the
+    // grip lets go. (This condition therefore always continues.)
     for (I = 0; I < Registry.Items.Length; ++I)
     {
         R = Registry.Items[I];
         if (R == None || R.SupportHand < 0 || R.Presenter == None
-            || !R.Presenter.HasValidSupportTracking() || R.Presenter.SupportContactWithinReleaseRange()) continue;
+            || !R.Presenter.HasValidSupportTracking() || R.Presenter.HasValidSupportTracking()) continue;
         if (R.Presenter.CanRetainCarriedSupport()) continue;
         // A held pump keeps its acquired support contact through sideways
         // strokes and moving reload parts. Input still releases the grip.

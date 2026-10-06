@@ -142,5 +142,91 @@ float4 PS():SV_TARGET { return float4(1,0,0,0.5); }
     alpha.Clear(context.Get(),foreign.view.Get(),transparent);
     Test(!alpha.RegisterSelector(0,&newInputOwner,nullptr,768,768),"missing current input owner rejects stale callbacks");
     checkDraw(newLeft,70,"loss of input ownership removes the previous selector correction");
+    // Threaded rendering: registration may not directly follow its clear.
+    {
+        kf2vr::adapter::HudTextAlpha threaded;threaded.allowRecent=true;
+        const auto drawWith=[&](kf2vr::adapter::HudTextAlpha& owner,const Target& target) {
+            D3D11_TEXTURE2D_DESC d{};target.texture->GetDesc(&d);
+            D3D11_VIEWPORT viewport{0,0,static_cast<float>(d.Width),static_cast<float>(d.Height),0,1};
+            context->RSSetViewports(1,&viewport);
+            auto* view=target.view.Get();
+            context->OMSetRenderTargets(1,&view,nullptr);owner.Targets(context.Get(),1,&view);
+            context->ClearRenderTargetView(view,backing);
+            kf2vr::adapter::HudTextAlpha::DrawScope scope;owner.BeforeDraw(context.Get(),scope);context->Draw(3,0);
+        };
+        auto status=makeTarget(1024,512),banner=makeTarget(1024,256),handLeft=makeTarget(768,768),handRight=makeTarget(768,768);
+        int owner=0;
+        Test(!threaded.RegisterPanel(0,&owner,&owner,1024,512),"threaded: nothing cleared yet cannot register");
+        threaded.Clear(context.Get(),status.view.Get(),transparent);
+        threaded.Clear(context.Get(),banner.view.Get(),transparent);
+        Test(threaded.RegisterPanel(0,&owner,&owner,1024,512) && threaded.lastFallback,
+             "threaded: an interleaved clear still identifies the status texture");
+        drawWith(threaded,status);Test(pixel(status,163),"threaded: recovered status target receives glyph alpha");
+        Test(threaded.RegisterPanel(4,&owner,&owner,1024,256),"threaded: the alert banner registers from the same history");
+        drawWith(threaded,banner);Test(pixel(banner,163),"threaded: alert banner receives glyph alpha");
+        threaded.Clear(context.Get(),handLeft.view.Get(),transparent);
+        threaded.Clear(context.Get(),handRight.view.Get(),transparent);
+        Test(threaded.RegisterSelector(1,&owner,&owner,768,768),"threaded: right selector registers");
+        Test(threaded.RegisterSelector(0,&owner,&owner,768,768),"threaded: left selector registers");
+        Test(threaded.PanelResource(0)==status.texture.Get(),"threaded: selector registration leaves the status slot");
+        drawWith(threaded,handLeft);Test(pixel(handLeft,163),"threaded: left selector texture receives glyph alpha");
+        drawWith(threaded,handRight);Test(pixel(handRight,163),"threaded: right selector texture is claimed separately");
+        threaded.Clear(context.Get(),handRight.view.Get(),transparent);
+        Test(threaded.RegisterSelector(1,&owner,&owner,768,768),"threaded: a re-cleared selector stays registered");
+        drawWith(threaded,handLeft);Test(pixel(handLeft,163),"threaded: the other selector is not displaced");
+        Test(!threaded.RegisterPanel(0,&owner,&owner,800,320),"threaded: Canvas size checks still apply");
+    }
+    // Threaded rendering with no observed clear: the Canvas flush's bind claims it.
+    {
+        kf2vr::adapter::HudTextAlpha bound;bound.allowRecent=true;
+        auto status=makeTarget(1024,512),wrong=makeTarget(800,320),handLeft=makeTarget(768,768);
+        int owner=0;
+        Test(!bound.RegisterPanel(0,&owner,&owner,1024,512),"bind: registration without a clear waits");
+        auto* wrongView=wrong.view.Get();bound.Targets(context.Get(),1,&wrongView);
+        Test(bound.PanelResource(0)==nullptr,"bind: a different-size target is not claimed");
+        auto* statusView=status.view.Get();
+        context->OMSetRenderTargets(1,&statusView,nullptr);bound.Targets(context.Get(),1,&statusView);
+        Test(bound.PanelResource(0)==status.texture.Get() && bound.boundClaims==1,"bind: the panel's own bind claims it");
+        context->ClearRenderTargetView(statusView,backing);
+        {
+            kf2vr::adapter::HudTextAlpha::DrawScope scope;bound.BeforeDraw(context.Get(),scope);context->Draw(3,0);
+        }
+        Test(pixel(status,163),"bind: claimed panel receives glyph alpha");
+        Test(!bound.RegisterSelector(0,&owner,&owner,768,768),"bind: selector waits as well");
+        bound.Targets(context.Get(),1,&statusView);
+        Test(bound.boundClaims==1,"bind: an owned panel target cannot be claimed by the selector");
+        auto* leftView=handLeft.view.Get();bound.Targets(context.Get(),1,&leftView);
+        Test(bound.boundClaims==2 && bound.PanelResource(0)==status.texture.Get(),"bind: selector claims its own size");
+        // Threaded-mode textures are R8G8B8A8_UNORM and bound as a slot list.
+        {
+            kf2vr::adapter::HudTextAlpha unorm;unorm.allowRecent=true;
+            D3D11_TEXTURE2D_DESC td{};td.Width=1024;td.Height=256;td.MipLevels=td.ArraySize=td.SampleDesc.Count=1;
+            td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;td.BindFlags=D3D11_BIND_RENDER_TARGET;
+            Target banner;HR(device->CreateTexture2D(&td,nullptr,&banner.texture));
+            HR(device->CreateRenderTargetView(banner.texture.Get(),nullptr,&banner.view));
+            ID3D11RenderTargetView* slots[8]{banner.view.Get()};
+            unorm.Targets(context.Get(),8,slots);
+            unorm.Clear(context.Get(),banner.view.Get(),transparent);
+            Test(unorm.RegisterPanel(4,&owner,&owner,1024,256) && !unorm.lastFallback,
+                 "unorm: a UNORM ScriptedTexture registers from its clear");
+            context->OMSetRenderTargets(8,slots,nullptr);unorm.Targets(context.Get(),8,slots);
+            context->ClearRenderTargetView(slots[0],backing);
+            {
+                kf2vr::adapter::HudTextAlpha::DrawScope scope;unorm.BeforeDraw(context.Get(),scope);
+                Test(scope.context!=nullptr,"unorm: an 8-slot bind with one target receives the alpha repair");
+                context->Draw(3,0);
+            }
+            ID3D11RenderTargetView* two[2]{banner.view.Get(),wrong.view.Get()};
+            unorm.Targets(context.Get(),2,two);
+            {
+                kf2vr::adapter::HudTextAlpha::DrawScope scope;unorm.BeforeDraw(context.Get(),scope);
+                Test(scope.context==nullptr,"unorm: multiple colour targets are left alone");
+            }
+        }
+        kf2vr::adapter::HudTextAlpha strict;
+        Test(!strict.RegisterPanel(0,&owner,&owner,1024,512),"strict: one-thread registration needs its clear");
+        strict.Targets(context.Get(),1,&statusView);
+        Test(strict.PanelResource(0)==nullptr,"strict: one-thread never claims at bind time");
+    }
     context->ClearState();std::printf("HUD alpha checks=%d failures=%d\n",checks,failures);return failures?1:0;
 }
