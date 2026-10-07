@@ -84,5 +84,56 @@ int wmain(int argc, wchar_t** argv) {
         if (!image) ++failures;
         dlss.Shutdown();
     }
+    // Single-pass stereo: both eyes side by side in one colour/depth target.
+    // Left half solid red, right half solid green; each eye must upscale its own half.
+    {
+        DlssUpscaler dlss;
+        wchar_t temp[MAX_PATH]{}; GetTempPathW(MAX_PATH,temp);
+        dlss.Configure(DlssMode::Quality,ngx,temp);
+        const unsigned render=DlssRenderExtent(output,DlssMode::Quality), wide=render*2;
+        D3D11_TEXTURE2D_DESC d{}; d.MipLevels=1; d.ArraySize=1; d.SampleDesc={1,0}; d.Usage=D3D11_USAGE_DEFAULT;
+        d.Width=wide; d.Height=render; d.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS; d.BindFlags=D3D11_BIND_RENDER_TARGET;
+        std::vector<unsigned> pixels(wide*render);
+        for (unsigned y=0;y<render;++y) for (unsigned x=0;x<wide;++x) pixels[y*wide+x]=x<render ? 0xff0000ffu : 0xff00ff00u;
+        D3D11_SUBRESOURCE_DATA init{pixels.data(),wide*4,0};
+        ComPtr<ID3D11Texture2D> color,depth,staging;
+        ComPtr<ID3D11Texture2D> outs[2];
+        bool ok=SUCCEEDED(device->CreateTexture2D(&d,&init,&color));
+        d.Format=DXGI_FORMAT_R24G8_TYPELESS; d.BindFlags=D3D11_BIND_DEPTH_STENCIL|D3D11_BIND_SHADER_RESOURCE;
+        ok=ok && SUCCEEDED(device->CreateTexture2D(&d,nullptr,&depth));
+        d.Width=output; d.Height=output; d.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+        d.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
+        for (auto& o:outs) ok=ok && SUCCEEDED(device->CreateTexture2D(&d,nullptr,&o));
+        std::string error;
+        for (std::uint32_t frame=1;frame<=8 && ok;++frame)
+            for (unsigned eye=0;eye<2 && ok;++eye) {
+                DlssEyeInput input;
+                input.view=Identity(); input.projection=Projection();
+                input.jitter=DlssJitterForPhase(frame,render,output);
+                input.renderX=eye*render; input.renderWidth=render; input.renderHeight=render; input.valid=true;
+                ok=dlss.Evaluate(device.Get(),context.Get(),eye,color.Get(),depth.Get(),outs[eye].Get(),input,error);
+            }
+        unsigned centre[2]{};
+        if (ok) {
+            d.Usage=D3D11_USAGE_STAGING; d.BindFlags=0; d.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+            device->CreateTexture2D(&d,nullptr,&staging);
+            for (unsigned eye=0;eye<2;++eye) {
+                context->CopyResource(staging.Get(),outs[eye].Get());
+                D3D11_MAPPED_SUBRESOURCE map{};
+                if (SUCCEEDED(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&map))) {
+                    centre[eye]=static_cast<const unsigned*>(map.pData)[(output/2)*(map.RowPitch/4)+output/2];
+                    context->Unmap(staging.Get(),0);
+                }
+            }
+        }
+        // R8G8B8A8 little-endian: red is the low byte, green the next.
+        const bool leftRed=(centre[0]&0xff)>200 && ((centre[0]>>8)&0xff)<50;
+        const bool rightGreen=((centre[1]>>8)&0xff)>200 && (centre[1]&0xff)<50;
+        const bool pass=ok && leftRed && rightGreen;
+        std::printf("single-pass pair Quality render=%ux%u (x2) left=0x%08x right=0x%08x %s %s\n",render,render,
+            centre[0],centre[1],ok?"":error.c_str(),pass?"PASS":"FAIL");
+        if (!pass) ++failures;
+        dlss.Shutdown();
+    }
     return failures ? 1 : 0;
 }

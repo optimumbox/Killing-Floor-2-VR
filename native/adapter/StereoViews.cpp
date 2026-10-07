@@ -187,6 +187,19 @@ private:
     bool changed_ = false;
 };
 
+// Allocated once for the process, on the game thread, the way ULocalPlayer
+// allocates its own; never freed (as a player's state lives until exit).
+void* RightEyeViewState(std::uintptr_t baseAddress) {
+    static void* state = nullptr;
+    static bool attempted = false;
+    if (!attempted) {
+        attempted = true;
+        const auto allocate = baseAddress + build::Rva(pinned::kAllocateViewStateRva);
+        if (Executable(allocate)) state = reinterpret_cast<void*(*)()>(allocate)();
+    }
+    return state;
+}
+
 void ConfigureEye(ViewCopy& copy, const EyeMatrices& matrices, const EyeRect& rect,
                   const std::array<float, 2>& random, InitializeView initialize) {
     // Prototype experiment: preserve the stock view state, including exposure
@@ -336,8 +349,15 @@ bool StereoViews::SubmitStereoPair(void* familyPointer, const xr::FrameState& fr
     // Sequential stereo submits one selected eye here. Do not copy or
     // initialize an unused second view, including its engine-global effects.
     if (!singleViewDiagnostic_) right.Construct(copy, source);
+    // Both views in one renderer must not share one state: KF2's per-view
+    // setup resets the state's per-frame lists and the right eye would read
+    // the left eye's occlusion results. Only when the stock view has a state.
+    if (!singleViewDiagnostic_ && !splitSubmit_ && separateRightState_ && view.state)
+        if (void* state = RightEyeViewState(baseAddress)) right.Set(pinned::view::kState, state);
     lastSubmittedValid_ = false;
+    lastPairValid_ = false;
     lastSubmitted_ = matrices[singleViewDiagnostic_?singleEye_:0];
+    lastPair_ = matrices;
     // DLSS: the engine draws with the jittered projection; the recorded pair
     // stays unjittered so motion vectors exclude the jitter.
     std::array<EyeMatrices, 2> drawn = matrices;
@@ -351,13 +371,24 @@ bool StereoViews::SubmitStereoPair(void* familyPointer, const xr::FrameState& fr
     // Declared after the copies: on every C++ unwind, restore family ownership
     // before destructing any copied view or its inner engine allocations.
     FamilyViewsRestore restore(familyPointer);
-    restore.Set(eyes,singleViewDiagnostic_?1:2);
-    originalSubmit(canvas, familyPointer);
-    restore.Restore();
+    if (!singleViewDiagnostic_ && splitSubmit_) {
+        for (unsigned eye = 0; eye < 2; ++eye) {
+            if (beforeEye_) beforeEye_(eye);
+            restore.Set(&eyes[eye], 1);
+            originalSubmit(canvas, familyPointer);
+            restore.Restore();
+            if (afterEye_) afterEye_(eye);
+        }
+    } else {
+        restore.Set(eyes,singleViewDiagnostic_?1:2);
+        originalSubmit(canvas, familyPointer);
+        restore.Restore();
+    }
     initialHead_ = candidateReference;
     referenceReady_ = true;
     lastAtlas_ = atlas;
     lastSubmittedValid_ = singleViewDiagnostic_;
+    lastPairValid_ = !singleViewDiagnostic_;
     return true;
 }
 
@@ -366,5 +397,6 @@ void StereoViews::ResetReference() noexcept {
     referenceReady_ = false;
     lastAtlas_ = {};
     lastSubmittedValid_ = false;
+    lastPairValid_ = false;
 }
 } // namespace kf2vr::adapter

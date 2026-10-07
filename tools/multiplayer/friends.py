@@ -227,6 +227,8 @@ def role_environment(environment, role):
         result["KF2VR_EYE_RENDER_PERCENT"] = str(percent)
     if role.get("role") == "driver" and role.get("native_adapter") and role.get("hide_bile_lens"):
         result["KF2VR_HIDE_BILE_LENS"] = "1"
+    if role.get("role") == "driver" and role.get("native_adapter") and role.get("hide_blood_lens"):
+        result["KF2VR_HIDE_BLOOD_LENS"] = "1"
     if role.get("dlss", "off") != "off" and role.get("role") == "driver" and role.get("native_adapter"):
         # The adapter loads nvngx_dlss.dll from the release's native folder.
         result["KF2VR_DLSS"] = role["dlss"]
@@ -405,6 +407,16 @@ def configure_role(run, name, user, game, args):
                 "PostProcessAA": "False", "UseVsync": "False", "AmbientOcclusion": "False",
                 "HBAO": "False", "AllowScreenSpaceReflections": "False", "LensFlares": "False",
                 "ImageGrainScaler": "0.500000"}
+            # Optional screen effects. HBAO+ is KF2's AmbientOcclusion effect
+            # with the HBAO+ technique selected. Lens flares and grain stay off.
+            hbao = getattr(args, "hbao", False) is True
+            reflections = getattr(args, "reflections", False) is True
+            if hbao:
+                settings.update({"AmbientOcclusion": "True", "HBAO": "True"})
+            if reflections:
+                settings["AllowScreenSpaceReflections"] = "True"
+            if hbao or reflections:
+                settings["ImageGrainScaler"] = "0.000000"
             path = configs / "KFSystemSettings.ini"
             text = read_ini(path) if path.exists() else "[SystemSettings]\n"
             text = set_ini(text, "SystemSettings", settings)
@@ -423,6 +435,11 @@ def configure_role(run, name, user, game, args):
                 # Coarse stage timers and a non-blocking GPU query every 30th
                 # frame; the costly per-script-call tracing stays off.
                 role["args"].append("-kf2vr-frame-timings")
+            if getattr(args, "single_pass", False):
+                role["args"].append("-kf2vr-single-pass")
+                if getattr(args, "frame_timings", False):
+                    # Diagnostic eye images beside native.log while measuring.
+                    role["args"].append("-kf2vr-eye-capture")
             if getattr(args, "threaded_render", False):
                 # Experimental: UE3's render thread draws frame N while the
                 # game thread ticks N+1. Replaces -onethread; no portals.
@@ -431,9 +448,18 @@ def configure_role(run, name, user, game, args):
             role["dlss"] = getattr(args, "dlss", None) or "off"
             role["dlss_sharpness"] = int(getattr(args, "dlss_sharpness", None) or 0)
             role["hide_bile_lens"] = getattr(args, "hide_bile_lens", True) is not False
+            role["hide_blood_lens"] = getattr(args, "hide_blood_lens", True) is not False
             requested_percent = getattr(args, "eye_render_percent", None)
             role["eye_render_percent"] = import_preferences(configs, eye_percent=requested_percent,
                                                             root=getattr(args, "profile_root", None))
+            # The VR script forces AO, HBAO+, reflections, lens flares and grain
+            # off unless screen effects are allowed; the session INI above
+            # then decides each one (lens flares and grain stay off).
+            path = configs / "KFGame.ini"
+            path.write_text(set_ini(read_ini(path), "KF2VR.VRHandsBridge", {
+                "bVRScreenEffects": "True" if (getattr(args, "hbao", False) is True
+                                               or getattr(args, "reflections", False) is True) else "False"}),
+                encoding="utf-16")
     if getattr(args, "solo", False):
         role["args"][0] = (f"{args.map}?Game=KFGameContent.KFGameInfo_Survival"
             f"?Difficulty={DIFFICULTIES[args.difficulty]}?GameLength={LENGTHS[args.game_length]}"
@@ -509,8 +535,17 @@ def parse_options(argv=None):
                         help="NVIDIA DLSS for the headset image (saved, initially off); requires --vr")
     parser.add_argument("--hide-bile-lens", action=argparse.BooleanOptionalAction, default=None,
                         help="VR: skip the Bloat bile screen splatter particles, a large GPU cost (saved, initially on)")
+    parser.add_argument("--hide-blood-lens", action=argparse.BooleanOptionalAction, default=None,
+                        help="VR: skip the on-screen blood splatter particles when hit; the red damage tint stays "
+                             "(saved, initially on)")
     parser.add_argument("--dlss-sharpness", type=int, default=None,
                         help="Sharpening after DLSS, 0 (off) to 100 (saved, initially 0)")
+    parser.add_argument("--hbao", action=argparse.BooleanOptionalAction, default=None,
+                        help="HBAO+ ambient occlusion (saved, initially off); VR")
+    parser.add_argument("--reflections", action=argparse.BooleanOptionalAction, default=None,
+                        help="Screen-space reflections (saved, initially off); VR")
+    parser.add_argument("--single-pass", action=argparse.BooleanOptionalAction, default=None,
+                        help="Experimental: render both eyes in one scene submission (Steam; saved, initially off); VR")
     parser.add_argument("--threaded-render", action=argparse.BooleanOptionalAction, default=None,
                         help="Experimental: render on UE3's render thread instead of -onethread (saved, initially off). "
                              "The portal gun's see-through view works only with this off; requires --vr")

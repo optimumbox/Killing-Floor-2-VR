@@ -454,10 +454,16 @@ class Launcher(tk.Tk):
         ttk.Checkbutton(grid, text="Hide Bloat bile screen splatter (large GPU saving)",
                         variable=self.hide_bile_lens).grid(row=row, column=1, sticky="w", pady=self.px(3))
         fields["Bile lens"] = (None, {})
+        row = len(fields)
+        self.hide_blood_lens = tk.BooleanVar(value=getattr(self.saved, "hide_blood_lens", True) is not False)
+        ttk.Checkbutton(grid, text="Hide hit blood screen splatter (keeps the red damage tint)",
+                        variable=self.hide_blood_lens).grid(row=row, column=1, sticky="w", pady=self.px(3))
+        fields["Blood lens"] = (None, {})
 
     def dlss_arguments(self, fields):
         return ["--dlss", self.pick(fields, "DLSS"), "--dlss-sharpness", str(int(self.dlss_sharpness.get())),
-                "--hide-bile-lens" if self.hide_bile_lens.get() else "--no-hide-bile-lens"]
+                "--hide-bile-lens" if self.hide_bile_lens.get() else "--no-hide-bile-lens",
+                "--hide-blood-lens" if self.hide_blood_lens.get() else "--no-hide-blood-lens"]
 
     @staticmethod
     def pick(fields, label):
@@ -615,6 +621,17 @@ class Launcher(tk.Tk):
                             variable=extras["threaded"]).pack(anchor="w", pady=(self.px(4), 0))
             self.label(frame, "OFF: portal see-through views. ON: flat portal fill; may improve frame rate.",
                        "small", DIM, wraplength=self.px(600)).pack(anchor="w")
+            extras["hbao"] = tk.BooleanVar(value=bool(getattr(self.saved, "hbao", False)))
+            ttk.Checkbutton(frame, text="HBAO+ ambient occlusion",
+                            variable=extras["hbao"]).pack(anchor="w", pady=(self.px(4), 0))
+            extras["reflections"] = tk.BooleanVar(value=bool(getattr(self.saved, "reflections", False)))
+            ttk.Checkbutton(frame, text="Screen-space reflections",
+                            variable=extras["reflections"]).pack(anchor="w")
+            extras["single_pass"] = tk.BooleanVar(value=bool(getattr(self.saved, "single_pass", False)))
+            ttk.Checkbutton(frame, text="Single-pass stereo: both eyes in one draw (experimental, Steam)",
+                            variable=extras["single_pass"]).pack(anchor="w", pady=(self.px(4), 0))
+            self.label(frame, "Saved; Join uses the last choice.",
+                       "small", DIM, wraplength=self.px(600)).pack(anchor="w")
         if not solo:
             self.section(frame, "Extras (optional)")
             for key, text, value in (
@@ -663,6 +680,9 @@ class Launcher(tk.Tk):
                 if pick("Render scale") != SCALES[0]:
                     arguments += ["--eye-render-percent", pick("Render scale").rstrip("%")]
                 arguments.append("--threaded-render" if extras["threaded"].get() else "--no-threaded-render")
+                arguments.append("--single-pass" if extras["single_pass"].get() else "--no-single-pass")
+                arguments.append("--hbao" if extras["hbao"].get() else "--no-hbao")
+                arguments.append("--reflections" if extras["reflections"].get() else "--no-reflections")
                 arguments += self.dlss_arguments(fields)
             if not solo:
                 arguments.append("--multiplayer-grabs" if extras["grabs"].get() else "--no-multiplayer-grabs")

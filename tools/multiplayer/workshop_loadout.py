@@ -132,11 +132,16 @@ def load_preferences(args):
         args.portal_gun = saved.get("portal_gun", False) is True
     if getattr(args, "threaded_render", None) is None:
         args.threaded_render = saved.get("threaded_render", False) is True
+    for key in ("single_pass", "hbao", "reflections"):
+        if getattr(args, key, None) is None:
+            setattr(args, key, saved.get(key, False) is True)
     if getattr(args, "dlss", None) is None:
         mode = saved.get("dlss", "off")
         args.dlss = mode if mode in DLSS_MODES else "off"
     if getattr(args, "hide_bile_lens", None) is None:
         args.hide_bile_lens = saved.get("hide_bile_lens", True) is not False
+    if getattr(args, "hide_blood_lens", None) is None:
+        args.hide_blood_lens = saved.get("hide_blood_lens", True) is not False
     if getattr(args, "dlss_sharpness", None) is None:
         value = saved.get("dlss_sharpness", 0)
         args.dlss_sharpness = value if type(value) is int and 0 <= value <= 100 else 0
@@ -166,7 +171,8 @@ def save_dlss_preferences(args):
     saved = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     saved.update({"dlss": getattr(args, "dlss", None) or "off",
                   "dlss_sharpness": int(getattr(args, "dlss_sharpness", None) or 0),
-                  "hide_bile_lens": getattr(args, "hide_bile_lens", True) is not False})
+                  "hide_bile_lens": getattr(args, "hide_bile_lens", True) is not False,
+                  "hide_blood_lens": getattr(args, "hide_blood_lens", True) is not False})
     temporary = path.with_suffix(".json.tmp")
     temporary.write_text(json.dumps(saved, indent=2), encoding="utf-8")
     temporary.replace(path)
@@ -187,9 +193,13 @@ def save_preferences(args):
         "game_length": getattr(args, "game_length", "short"),
         "vr_quality": getattr(args, "vr_quality", "performance"),
         "threaded_render": bool(getattr(args, "threaded_render", False)),
+        "single_pass": bool(getattr(args, "single_pass", False)),
+        "hbao": bool(getattr(args, "hbao", False)),
+        "reflections": bool(getattr(args, "reflections", False)),
         "dlss": getattr(args, "dlss", None) or "off",
         "dlss_sharpness": int(getattr(args, "dlss_sharpness", None) or 0),
         "hide_bile_lens": getattr(args, "hide_bile_lens", True) is not False,
+        "hide_blood_lens": getattr(args, "hide_blood_lens", True) is not False,
         "breacher": bool(getattr(args, "breacher", False))})
     # Solo applies no hosted loadout. Remember its common choices without
     # erasing the mods and host settings the next hosted session will use.

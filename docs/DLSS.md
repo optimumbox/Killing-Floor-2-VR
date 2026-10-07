@@ -61,6 +61,11 @@ resolution. The launcher checkbox **Hide Bloat bile screen splatter** (default o
 sets `KF2VR_HIDE_BILE_LENS=1`, and the adapter skips `AddCameraLensEffect` for
 those classes. Other screen effects are unchanged.
 
+**Hide hit blood screen splatter** (default on) does the same for the hit
+blood lens particles (`KFCameraLensEmit_BloodBase`, `KFCameraLensEmit_BloodGorge`)
+via `KF2VR_HIDE_BLOOD_LENS=1`. The red damage tint is a separate post-process
+effect and stays.
+
 ## Support grip lock (physical stocks)
 
 A support grip acquired at the foregrip stays held, and engaged for two-hand
@@ -72,3 +77,9 @@ stock - gun hand aims**.
 ## Launcher
 
 Pages that outgrow the window grow it to fit, and Back/Start keep their space.
+
+## Single-pass stereo
+
+See [SINGLE_PASS.md](SINGLE_PASS.md) for the single-pass stereo mode and its
+render fixes (visibility, occlusion, lighting, fluid, whole-scene shadows,
+HBAO+ and DLSS depth).
