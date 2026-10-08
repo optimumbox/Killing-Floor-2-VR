@@ -213,6 +213,12 @@ if(BUILD_TESTING AND WIN32)
   target_link_libraries(kf2vr_foreground_depth_test PRIVATE d3d11 d3dcompiler)
   add_test(NAME native_foreground_depth COMMAND kf2vr_foreground_depth_test)
 
+  add_executable(kf2vr_stereo_reflections_test tests/StereoReflectionsTest.cpp)
+  target_include_directories(kf2vr_stereo_reflections_test PRIVATE .)
+  target_compile_definitions(kf2vr_stereo_reflections_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+  target_link_libraries(kf2vr_stereo_reflections_test PRIVATE d3d11 d3dcompiler)
+  add_test(NAME native_stereo_reflections COMMAND kf2vr_stereo_reflections_test)
+
   add_executable(kf2vr_hud_alpha_test tests/HudTextAlphaTest.cpp)
   target_include_directories(kf2vr_hud_alpha_test PRIVATE .)
   target_compile_definitions(kf2vr_hud_alpha_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)

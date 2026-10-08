@@ -65,6 +65,15 @@ single-view code, so two views in one scene needed the following fixes.
   copied back, in a private D3D11 context state. KF2 reads the AO target
   between the two eyes' calls, so both eyes are rendered at the left eye's
   call; without that the right eye lost its lighting.
+- **Screen-space reflections per eye.** KF2's reflection compute shader
+  (0x3605d0, the DX11 path) treats the whole scene buffer as one view with
+  views[0]'s camera, so both eyes were traced as one wide image with the left
+  eye's camera. The pass now runs once per eye with that eye as views[0], and
+  its dispatch is replaced by the same shader limited to the eye's rectangle
+  (`StereoReflections.h`, translated from the game's bytecode; hit UVs map back
+  into the two-eye buffer). `kf2vr_stereo_reflections_test` checks each eye
+  against the eye traced alone, and against KF2's own shader when
+  `KF2VR_GLOBAL_SHADER_CACHE` names `GlobalShaderCache-PC-D3D-SM5.bin`.
 
 ## Screen effects
 

@@ -34,6 +34,7 @@
 #include "StereoViews.h"
 #include "Dlss.h"
 #include "EyeCapture.h"
+#include "StereoReflections.h"
 #include "XrGamepad.h"
 #include "HeadAim.h"
 #include "WeaponHaptics.h"
@@ -3877,6 +3878,52 @@ std::uint32_t HookFlareOcclusion(void* self,void* primitive,void* unused,void* v
     std::memcpy(views+0x1380+8,&right,sizeof(right));
     return result;
 }
+// Screen-space reflections, compute path (0x3605d0: renderer; KF2's DX11 path,
+// called from 0x36fae0). It binds views[0]'s compute view constants and
+// dispatches over the whole scene buffer, and its shader treats that buffer as
+// one view, so in single-pass both eyes were traced as one wide image with the
+// left eye's camera. For a pair it runs once per eye with that eye as views[0],
+// and the dispatch is replaced by the same shader limited to the eye's
+// rectangle (StereoReflections.h).
+using SsrComputeFn=void(*)(void*);
+SsrComputeFn originalSsrCompute=nullptr;
+using DispatchFn=void(STDMETHODCALLTYPE*)(ID3D11DeviceContext*,UINT,UINT,UINT);
+DispatchFn originalDispatch=nullptr;
+adapter::StereoReflections stereoReflections;
+const std::byte* ssrEyeView=nullptr;
+std::uint64_t ssrEyeDispatches=0, ssrFallbacks=0;
+void STDMETHODCALLTYPE HookDispatch(ID3D11DeviceContext* context,UINT x,UINT y,UINT z) {
+    if (const std::byte* view=ssrEyeView) {
+        ssrEyeView=nullptr;
+        std::int32_t rect[4]{}; std::memcpy(rect,view+0x6c,sizeof(rect));
+        const float eye[4]{static_cast<float>(rect[0]),static_cast<float>(rect[1]),static_cast<float>(rect[2]),static_cast<float>(rect[3])};
+        ComPtr<ID3D11Device> device; context->GetDevice(&device);
+        if (stereoReflections.Ready(device.Get()) && stereoReflections.Dispatch(context,eye,originalDispatch)) {
+            if (Interesting(++ssrEyeDispatches)) Log("SinglePass reflections traced per eye count=%llu rect=%d,%d %dx%d",
+                static_cast<unsigned long long>(ssrEyeDispatches),rect[0],rect[1],rect[2],rect[3]);
+            return;
+        }
+        if (Interesting(++ssrFallbacks)) Log("SinglePass reflections per-eye shader unavailable count=%llu",
+            static_cast<unsigned long long>(ssrFallbacks));
+    }
+    originalDispatch(context,x,y,z);
+}
+void HookSsrCompute(void* renderer) {
+    auto* base=static_cast<std::byte*>(renderer);
+    std::byte* views=nullptr; std::int32_t count=0;
+    if (base) { std::memcpy(&views,base+0x6c,sizeof(views)); std::memcpy(&count,base+0x74,sizeof(count)); }
+    if (!views || count!=2 || views!=singlePassPairViews || stereoReflections.Failed()) { originalSsrCompute(renderer); return; }
+    struct Restore {
+        std::byte* base; std::byte* views;
+        ~Restore() { ssrEyeView=nullptr; std::memcpy(base+0x6c,&views,sizeof(views)); }
+    } restore{base,views};
+    for (int eye=0;eye<2;++eye) {
+        std::byte* view=views+static_cast<std::size_t>(eye)*0x1380;
+        std::memcpy(base+0x6c,&view,sizeof(view));
+        ssrEyeView=view;
+        originalSsrCompute(renderer);
+    }
+}
 // Screen effects chosen in the launcher (-kf2vr-hbao, -kf2vr-reflections).
 // The VR script forces AO, HBAO+ and reflections off with SCALE SET whatever
 // the launcher asked for. FSystemSettings::Exec (0x2fc960: this, command,
@@ -4142,6 +4189,10 @@ bool InstallHooks(HINSTANCE module) {
                 reinterpret_cast<void*>(&HookShadowProjection),reinterpret_cast<void**>(&originalShadowProjection)});
             hooks.push_back({reinterpret_cast<void*>(gameBase+0xcd03b0),
                 reinterpret_cast<void*>(&HookHbaoRhi),reinterpret_cast<void**>(&originalHbaoRhi)});
+            hooks.push_back({reinterpret_cast<void*>(gameBase+0x3605d0),
+                reinterpret_cast<void*>(&HookSsrCompute),reinterpret_cast<void**>(&originalSsrCompute)});
+            hooks.push_back({contextTable[41],
+                reinterpret_cast<void*>(&HookDispatch),reinterpret_cast<void**>(&originalDispatch)});
         }
         singlePassSplit=singlePass && wcsstr(GetCommandLineW(),L"-kf2vr-sp-split")!=nullptr;
         // The game's own two-view lighting matches both eyes' shadows; the
@@ -4162,7 +4213,7 @@ bool InstallHooks(HINSTANCE module) {
             }
             if (eyeCaptureDirectory.empty()) eyeCaptureEnabled=false;
         }
-        Log("SinglePass revision=72 vrHbao=%d vrReflections=%d sharedFlareOcclusion=1 hbaoEyeOutput=3 hbaoState=1 hbaoBothEyes=1 occlusion=%d queryConstants=1 stereoDepthGuard=2 hbaoViewports=1 sharedEyeShadows=4 rightEyeQuads=1 kf2Visibility=1 leftOcclusion=%d rightEyeState=%d rightOcclusion=%d enabled=%d splitSubmit=%d stockLighting=%d eyeCapture=%d",
+        Log("SinglePass revision=74 stereoReflections=1 vrHbao=%d vrReflections=%d sharedFlareOcclusion=1 hbaoEyeOutput=3 hbaoState=1 hbaoBothEyes=1 occlusion=%d queryConstants=1 stereoDepthGuard=2 hbaoViewports=1 sharedEyeShadows=4 rightEyeQuads=1 kf2Visibility=1 leftOcclusion=%d rightEyeState=%d rightOcclusion=%d enabled=%d splitSubmit=%d stockLighting=%d eyeCapture=%d",
             vrHbao?1:0,vrReflections?1:0,singlePassOcclusion?1:0,singlePassLeftOcclusion?1:0,singlePassSeparateState?1:0,singlePassRightOcclusion?1:0,singlePass?1:0,
             singlePassSplit?1:0,singlePassStockLighting?1:0,eyeCaptureEnabled?1:0);
         if (MH_Initialize()==MH_OK) {
