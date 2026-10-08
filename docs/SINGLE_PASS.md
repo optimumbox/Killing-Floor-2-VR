@@ -19,12 +19,18 @@ single-view code, so two views in one scene needed the following fixes.
   pop-up text) and flickered the right eye. Both views now run KF2's own
   per-view visibility, setup and translucency sorting, with the family-wide
   steps (including shadow setup for both views) once per frame.
-- **No occlusion culling in single-pass.** UE3 keeps one pending occlusion
+- **Occlusion culling from the left eye.** UE3 keeps one pending occlusion
   query per object in the player's view state, so two views in one frame
-  overwrite each other's queries; in practice objects, walls and enemies
-  popped in and out of either eye. Both eyes now cull by view frustum only: the
-  right eye runs visibility without a view state, and neither eye reads or
-  submits occlusion queries.
+  overwrote each other's queries. The right eye runs visibility without a view
+  state (frustum culling) and then takes a state of its own for late passes;
+  the left eye keeps the player's state and runs occlusion queries alone.
+  KF2's GPU HiZ culling, which used views[0] against the whole two-eye depth
+  buffer, is off with it. The left eye's queries were drawn with the right
+  eye's view constants still in the GPU buffer (the RHI fills a shadow copy and
+  did not upload it before the queries), so every box was tested from the
+  wrong projection and walls, doors and objects popped out; the left eye's
+  constants are now written before its first query. `-kf2vr-sp-no-occlusion`
+  returns to frustum culling only.
 - **The game's own two-view lighting.** Lighting is no longer split per eye,
   which had darkened the right eye's shadows. A per-eye split remains as a
   diagnostic (`-kf2vr-sp-split-lighting`).
@@ -42,8 +48,23 @@ single-view code, so two views in one scene needed the following fixes.
   its input viewport disabled. Each eye's call now gets that eye's rectangle.
 - **DLSS world depth.** KF2 clears depth before the first-person foreground;
   the adapter keeps world depth for DLSS motion vectors. Single-pass clears per
-  eye rectangle, which the guard did not recognise, so DLSS saw only the weapon
-  and aliased nearby geometry. The guard now knows both eye rectangles.
+  eye rectangle through RHIClear's clear-quad path (the viewport does not cover
+  the whole target), which never reached the ClearDepthStencilView guard, so
+  DLSS motion vectors treated the world as infinitely far away: right for head
+  rotation only, and the image softened while moving. RHIClear is hooked and
+  eye clears go through the guard, which matches the depth buffer by resource
+  and accepts depth-only eye clears.
+- **Lens flares in both eyes.** Lens flare components (such as headlight
+  rings) fade by the occlusion coverage of their primitive, read through a
+  per-state cache. The right eye's late state runs no queries, so it evaluates
+  the flare occlusion parameter with the left eye's state.
+- **HBAO+ in single-pass.** KF2 uses HBAO+ 2.x, whose output covers the whole
+  render target and is only correct for a viewport at the origin. Each eye
+  renders into a scratch copy (the right eye as its own eye-sized frame: depth
+  copied to the origin of an eye-sized texture) and only its rectangle is
+  copied back, in a private D3D11 context state. KF2 reads the AO target
+  between the two eyes' calls, so both eyes are rendered at the left eye's
+  call; without that the right eye lost its lighting.
 
 ## Screen effects
 

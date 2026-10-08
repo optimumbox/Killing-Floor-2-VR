@@ -29,6 +29,10 @@ struct AppliedHeadAim {
 inline constexpr float kMaxWorldViewOffset = 400.0f;
 bool IsValidWorldViewOffset(const Vec3& offset) noexcept;
 
+// Game thread only: a second persistent FSceneViewState for the right eye of
+// a single-pass pair, allocated once like the player's own (never freed).
+void* AllocateRightEyeViewState(std::uintptr_t baseAddress);
+
 // Pure calculation, exposed for offline validation. Matrices use UE3's
 // row-vector camera convention (+X right, +Y up, +Z forward). Native depth
 // projection coefficients remain unchanged. World scale is provisional.

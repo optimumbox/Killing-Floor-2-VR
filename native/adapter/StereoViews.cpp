@@ -200,6 +200,11 @@ void* RightEyeViewState(std::uintptr_t baseAddress) {
     return state;
 }
 
+} // namespace
+
+void* AllocateRightEyeViewState(std::uintptr_t baseAddress) { return RightEyeViewState(baseAddress); }
+
+namespace {
 void ConfigureEye(ViewCopy& copy, const EyeMatrices& matrices, const EyeRect& rect,
                   const std::array<float, 2>& random, InitializeView initialize) {
     // Prototype experiment: preserve the stock view state, including exposure

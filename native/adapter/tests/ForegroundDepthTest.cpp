@@ -131,6 +131,21 @@ float4 PS(P p):SV_TARGET { return float4(p.c,1); }
     policy.Begin(true);
     at(both);clear(false);                          // one world clear of both eyes
     at(left);clear(true);at(right);clear(true);     // foreground clears per eye
+    // A second view of the same depth buffer is the same target.
+    ComPtr<ID3D11DepthStencilView> dsv2;HR(device->CreateDepthStencilView(depth.Get(),&dd,&dsv2));
+    policy.Begin(true);
+    at(left);clear(false);at(right);flags=3;
+    Test(!policy.Filter(context.Get(),dsv2.Get(),flags,1,0) && flags==3,"other view: right eye world clear");
+    at(right);flags=3;
+    Test(policy.Filter(context.Get(),dsv2.Get(),flags,1,0) && flags==D3D11_CLEAR_STENCIL,"other view: right eye foreground clear");
+    // RHIClear's quad path may clear an eye's depth alone.
+    policy.Begin(true);
+    at(left);flags=D3D11_CLEAR_DEPTH;
+    Test(!policy.Filter(context.Get(),dsv.Get(),flags,1,0) && flags==D3D11_CLEAR_DEPTH,"depth-only eye world clear");
+    at(left);flags=D3D11_CLEAR_DEPTH;
+    Test(policy.Filter(context.Get(),dsv.Get(),flags,1,0) && flags==0,"depth-only eye foreground clear skipped");
+    at(both);flags=D3D11_CLEAR_DEPTH;
+    Test(!policy.Filter(context.Get(),dsv.Get(),flags,1,0) && flags==D3D11_CLEAR_DEPTH,"depth-only clear of both eyes unchanged");
     policy.Begin(false);
     at(left);clear(false);at(right);clear(false);   // inactive: never preserved
     policy.ClearEyes();
