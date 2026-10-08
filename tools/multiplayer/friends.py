@@ -440,6 +440,12 @@ def configure_role(run, name, user, game, args):
                 if getattr(args, "frame_timings", False):
                     # Diagnostic eye images beside native.log while measuring.
                     role["args"].append("-kf2vr-eye-capture")
+            # The VR script turns AO, HBAO+ and reflections off; the native
+            # adapter keeps the ones chosen here on.
+            if getattr(args, "hbao", False) is True:
+                role["args"].append("-kf2vr-hbao")
+            if getattr(args, "reflections", False) is True:
+                role["args"].append("-kf2vr-reflections")
             if getattr(args, "threaded_render", False):
                 # Experimental: UE3's render thread draws frame N while the
                 # game thread ticks N+1. Replaces -onethread; no portals.

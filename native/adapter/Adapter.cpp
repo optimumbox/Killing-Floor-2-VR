@@ -22,6 +22,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <cwctype>
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -1947,7 +1948,9 @@ void UpdateSession(void* session) {
         left.aimPoseTracked && right.aimPoseTracked && left.triggerActive && right.triggerActive;
     const bool chord=chordActive && left.stickPressed && right.stickPressed && left.triggerAxis<.1f && right.triggerAxis<.1f &&
         std::abs(left.stickX)<.2f && std::abs(left.stickY)<.2f && std::abs(right.stickX)<.2f && std::abs(right.stickY)<.2f;
-    if (demo->sessionMenuInput.Update(fresh,left.menuActive || right.menuActive,menuDown,chordActive,chord,demo->frame.predictedDisplayTime)) {
+    const bool padHold=right.menuHoldActive && right.menuHoldPressed && right.triggerAxis<.1f;
+    if (demo->sessionMenuInput.Update(fresh,left.menuActive || right.menuActive,menuDown,chordActive,chord,demo->frame.predictedDisplayTime,
+            right.menuHoldActive,padHold)) {
         CancelMenuPointer(); demo->menu.Recenter(); script.Write(session,L"NativeToggleRequested",1);
         return;
     }
@@ -3874,6 +3877,38 @@ std::uint32_t HookFlareOcclusion(void* self,void* primitive,void* unused,void* v
     std::memcpy(views+0x1380+8,&right,sizeof(right));
     return result;
 }
+// Screen effects chosen in the launcher (-kf2vr-hbao, -kf2vr-reflections).
+// The VR script forces AO, HBAO+ and reflections off with SCALE SET whatever
+// the launcher asked for. FSystemSettings::Exec (0x2fc960: this, command,
+// output device) turns the chosen effects on at the script's first SCALE
+// command and drops its later commands turning them off. Everything else
+// (lens flares, grain, blur) is still the script's policy.
+using SettingsExecFn=std::uint32_t(*)(void*,const wchar_t*,void*);
+SettingsExecFn originalSettingsExec=nullptr;
+bool vrHbao=false, vrReflections=false, vrEffectsApplied=false;
+std::uint64_t vrEffectsKept=0;
+std::uint32_t HookSettingsExec(void* self,const wchar_t* command,void* output) {
+    if ((vrHbao || vrReflections) && command && self && output) {
+        std::wstring text(command);
+        for (auto& c:text) c=static_cast<wchar_t>(towlower(c));
+        while (!text.empty() && iswspace(text.back())) text.pop_back();
+        if (text.rfind(L"scale set ",0)==0) {
+            if (!vrEffectsApplied) {
+                vrEffectsApplied=true;
+                if (vrHbao) { originalSettingsExec(self,L"SCALE SET AmbientOcclusion True",output); originalSettingsExec(self,L"SCALE SET HBAO True",output); }
+                if (vrReflections) originalSettingsExec(self,L"SCALE SET AllowScreenSpaceReflections True",output);
+                Log("VR screen effects applied hbao=%d reflections=%d",vrHbao?1:0,vrReflections?1:0);
+            }
+            const auto off=[&](const wchar_t* key) { return text==std::wstring(L"scale set ")+key+L" false"; };
+            if ((vrHbao && (off(L"ambientocclusion") || off(L"hbao"))) || (vrReflections && off(L"allowscreenspacereflections"))) {
+                if (Interesting(++vrEffectsKept)) Log("VR screen effects kept on: dropped \"%ls\" count=%llu",command,
+                    static_cast<unsigned long long>(vrEffectsKept));
+                return 1;
+            }
+        }
+    }
+    return originalSettingsExec(self,command,output);
+}
 // View constants (0xcd61d0: rhi, view): keep the left eye's while its occlusion
 // queries are submitted.
 using ViewConstantsFn=void(*)(void*,void*);
@@ -4083,6 +4118,11 @@ bool InstallHooks(HINSTANCE module) {
             Log("SinglePass refused: the multiview lighting evidence covers the Steam executable only");
             singlePass=false;
         }
+        vrHbao=stereoRequested && wcsstr(GetCommandLineW(),L"-kf2vr-hbao")!=nullptr;
+        vrReflections=stereoRequested && wcsstr(GetCommandLineW(),L"-kf2vr-reflections")!=nullptr;
+        if ((vrHbao || vrReflections) && adapter::build::selected==adapter::build::Store::Steam)
+            hooks.push_back({reinterpret_cast<void*>(gameBase+0x2fc960),
+                reinterpret_cast<void*>(&HookSettingsExec),reinterpret_cast<void**>(&originalSettingsExec)});
         if (singlePass) {
             hooks.push_back({reinterpret_cast<void*>(gameBase+0x911620),
                 reinterpret_cast<void*>(&HookRenderLighting),reinterpret_cast<void**>(&originalRenderLighting)});
@@ -4122,8 +4162,8 @@ bool InstallHooks(HINSTANCE module) {
             }
             if (eyeCaptureDirectory.empty()) eyeCaptureEnabled=false;
         }
-        Log("SinglePass revision=71 sharedFlareOcclusion=1 hbaoEyeOutput=3 hbaoState=1 hbaoBothEyes=1 occlusion=%d queryConstants=1 stereoDepthGuard=2 hbaoViewports=1 sharedEyeShadows=4 rightEyeQuads=1 kf2Visibility=1 leftOcclusion=%d rightEyeState=%d rightOcclusion=%d enabled=%d splitSubmit=%d stockLighting=%d eyeCapture=%d",
-            singlePassOcclusion?1:0,singlePassLeftOcclusion?1:0,singlePassSeparateState?1:0,singlePassRightOcclusion?1:0,singlePass?1:0,
+        Log("SinglePass revision=72 vrHbao=%d vrReflections=%d sharedFlareOcclusion=1 hbaoEyeOutput=3 hbaoState=1 hbaoBothEyes=1 occlusion=%d queryConstants=1 stereoDepthGuard=2 hbaoViewports=1 sharedEyeShadows=4 rightEyeQuads=1 kf2Visibility=1 leftOcclusion=%d rightEyeState=%d rightOcclusion=%d enabled=%d splitSubmit=%d stockLighting=%d eyeCapture=%d",
+            vrHbao?1:0,vrReflections?1:0,singlePassOcclusion?1:0,singlePassLeftOcclusion?1:0,singlePassSeparateState?1:0,singlePassRightOcclusion?1:0,singlePass?1:0,
             singlePassSplit?1:0,singlePassStockLighting?1:0,eyeCaptureEnabled?1:0);
         if (MH_Initialize()==MH_OK) {
             success=true;
