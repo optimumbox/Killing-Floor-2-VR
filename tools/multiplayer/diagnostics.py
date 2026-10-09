@@ -105,7 +105,7 @@ def summarize(root):
 
 def native_digest(path):
     """Numbers and allowlisted identifiers from the adapter log: headset, runtime,
-    eye scale and the 5-second frame-pacing lines (always on, lite mode)."""
+    eye scale and the 5-second frame-pacing lines (Record performance data, or -kf2vr-verbose-log)."""
     if not path.is_file():
         return {}
     text = path.read_text(encoding="utf-8", errors="replace")[-2_000_000:]

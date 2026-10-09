@@ -455,7 +455,12 @@ bool HashFile(const wchar_t* path,std::string& result) {
     if (algorithm) BCryptCloseAlgorithmProvider(algorithm,0);
     CloseHandle(file); return success;
 }
-bool Interesting(unsigned long long count) { return count<6 || count%300==0; }
+// Periodic status lines (every 300th event) and the always-on frame pacing
+// summary are diagnostics: they only run with -kf2vr-frame-timings (the
+// launcher's Record performance data) or -kf2vr-verbose-log. Normal play logs
+// the first few events of each kind.
+bool verboseLog=false;
+bool Interesting(unsigned long long count) { return count<6 || (verboseLog && count%300==0); }
 bool Readable(const void* pointer,size_t bytes) {
     const uintptr_t start=reinterpret_cast<uintptr_t>(pointer);
     if (!start || start+bytes<start) return false;
@@ -3183,7 +3188,7 @@ HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* swapchain,UINT interval,UI
     // present and one line every 5 s, so "what frame rate did you get" is
     // answered without the opt-in stage timers or GPU queries. Owner-thread
     // only, like the full timers, so plain statics are safe.
-    if (!adapter::timing::enabled && !(flags&DXGI_PRESENT_TEST) && stereoRequested && demo &&
+    if (verboseLog && !adapter::timing::enabled && !(flags&DXGI_PRESENT_TEST) && stereoRequested && demo &&
         swapchain==demo->ownerSwapchain.load(std::memory_order_acquire) &&
         GetCurrentThreadId()==demo->ownerThread.load(std::memory_order_acquire)) {
         static adapter::timing::Intervals pacing;
@@ -4213,8 +4218,8 @@ bool InstallHooks(HINSTANCE module) {
             }
             if (eyeCaptureDirectory.empty()) eyeCaptureEnabled=false;
         }
-        Log("SinglePass revision=74 stereoReflections=1 vrHbao=%d vrReflections=%d sharedFlareOcclusion=1 hbaoEyeOutput=3 hbaoState=1 hbaoBothEyes=1 occlusion=%d queryConstants=1 stereoDepthGuard=2 hbaoViewports=1 sharedEyeShadows=4 rightEyeQuads=1 kf2Visibility=1 leftOcclusion=%d rightEyeState=%d rightOcclusion=%d enabled=%d splitSubmit=%d stockLighting=%d eyeCapture=%d",
-            vrHbao?1:0,vrReflections?1:0,singlePassOcclusion?1:0,singlePassLeftOcclusion?1:0,singlePassSeparateState?1:0,singlePassRightOcclusion?1:0,singlePass?1:0,
+        Log("SinglePass revision=75 verboseLog=%d stereoReflections=1 vrHbao=%d vrReflections=%d sharedFlareOcclusion=1 hbaoEyeOutput=3 hbaoState=1 hbaoBothEyes=1 occlusion=%d queryConstants=1 stereoDepthGuard=2 hbaoViewports=1 sharedEyeShadows=4 rightEyeQuads=1 kf2Visibility=1 leftOcclusion=%d rightEyeState=%d rightOcclusion=%d enabled=%d splitSubmit=%d stockLighting=%d eyeCapture=%d",
+            verboseLog?1:0,vrHbao?1:0,vrReflections?1:0,singlePassOcclusion?1:0,singlePassLeftOcclusion?1:0,singlePassSeparateState?1:0,singlePassRightOcclusion?1:0,singlePass?1:0,
             singlePassSplit?1:0,singlePassStockLighting?1:0,eyeCaptureEnabled?1:0);
         if (MH_Initialize()==MH_OK) {
             success=true;
@@ -4298,6 +4303,7 @@ DWORD WINAPI AdapterMain(void* parameter) {
     adapter::guardedScriptReads=wcsstr(GetCommandLineW(),L"-kf2vr-checked-reads")==nullptr;
     perEyePresentation=wcsstr(GetCommandLineW(),L"-kf2vr-per-eye-presentation")!=nullptr;
     adapter::timing::enabled=adapter::timing::scriptEnabled || wcsstr(GetCommandLineW(),L"-kf2vr-frame-timings")!=nullptr;
+    verboseLog=adapter::timing::enabled || wcsstr(GetCommandLineW(),L"-kf2vr-verbose-log")!=nullptr;
     adapter::timing::vmSamplingEnabled=adapter::timing::enabled && !adapter::timing::scriptEnabled;
     adapter::timing::drilldownEnabled=wcsstr(GetCommandLineW(),L"-kf2vr-frame-drilldown")!=nullptr;
     wchar_t percentText[16]{};

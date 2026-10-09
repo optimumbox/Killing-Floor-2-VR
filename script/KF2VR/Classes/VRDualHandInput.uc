@@ -78,7 +78,8 @@ function bool HandCarrying(int Hand)
 }
 
 // A hand beside the head, not in front of the face, so a pistol raised to the
-// eye never counts. Y/B pressed here is the head lamp, for any weapon.
+// eye never counts. Y/B pressed here is the head lamp, for any weapon; so is a
+// grip squeeze of an empty hand.
 function bool HandAtTemple(int Hand)
 {
     local vector Offset, X, Y, Z;
@@ -866,6 +867,17 @@ function UpdateHand(int Hand, float DeltaTime)
     }
     if (Lower && InputState[Hand].bLowerWasDown) LowerTime[Hand] += DeltaTime;
     GripEdge = Grip && !InputState[Hand].bGripWasDown && Bridge.Hands[Hand].bGripArmed;
+    // Head lamp, also by grip: a fresh squeeze of an empty hand at the temple
+    // toggles it like the upper button there. The squeeze is spent, so it
+    // grabs nothing else, and the next toggle needs a release first.
+    if (GripEdge && !HadSelector && Inventory.Registry.GetPrimary(Hand) == None
+        && Inventory.Registry.GetSupport(Hand) == None && !HandCarrying(Hand) && HandAtTemple(Hand))
+    {
+        Bridge.Human.ToggleEquipment();
+        ModeFeedback(Hand, true);
+        Bridge.Hands[Hand].bGripArmed = false;
+        GripEdge = false;
+    }
     // A fresh squeeze decides the world grab once, before the generic weapon,
     // body-slot and chest-grenade fallbacks below -- unless the hand is in one
     // of the player's own body zones, where the zone wins.

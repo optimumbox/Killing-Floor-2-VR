@@ -67,7 +67,8 @@ start OFF and follow the host. Saved preferences override starting defaults.
   Syringe and welder are excluded. **HOLSTER FIT** calibrates the hip slots.
 - Dosh remains the stock toss action, not a hip-wallet grab: keyboard **B** on
   the default desktop layout. VR controller B still controls right-hand inventory.
-- Y/B beside that controller's temple toggles the flashlight instead of swapping.
+- Y/B beside that controller's temple toggles the flashlight instead of swapping. A fresh
+  grip squeeze of an empty hand there does the same.
   The non-movement-stick click offers the welder near a closed/broken door; it
   always equips the right hand. Trigger welds, A plus trigger unwelds; click
   again or walk away to return the previous right-hand item.
@@ -250,6 +251,7 @@ slot to recall. Behavior, tuning and pending acceptance.
 | Y / B, single tap (240 ms double-tap window) | Quick-swap the left / right hand's exact previous weapon, or stow to an open hand when no distinct previous weapon exists; cancel while open |
 | Y / B, double tap | Stow/open only that controller's hand through the inventory ownership path; carried weapons and previous-item history remain available; empty hands still punch and charge fists. A hand that is already open draws the syringe instead (refused if the other hand holds it) |
 | Y / B pressed with that hand beside the head | Toggle the flashlight (head lamp), whatever either hand holds. The hand must be within 20 UU of the head and not in front of the face, so a raised pistol still quick-swaps; the press never opens the wheel |
+| Grip squeezed with an empty hand beside the head | Toggle the flashlight, as Y / B there. Not while that hand holds, supports or carries anything; the squeeze grabs nothing else, and the next toggle needs a release |
 | Y / B, hold 250 ms then release | Open spatial inventory for that same hand; it stays open. The opening hand's stick is idle while it is open; the other stick keeps its locomotion role |
 | Point or move the opening controller toward an icon, then squeeze and release its trigger | Equip into that same hand on release and close the wheel automatically; stick tilt never highlights a sector |
 | Trigger with the hand back at the centre (nothing highlighted), or Y / B while the wheel is open | Cancel |

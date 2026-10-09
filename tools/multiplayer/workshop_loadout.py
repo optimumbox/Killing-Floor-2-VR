@@ -91,6 +91,9 @@ def parse_mods(value):
 # launch, and only a profile with nothing in it falls back to the shipped
 # default. Saved play mode applies to Host and Solo; a friend joining still gets the
 # flat screen unless they ask for --vr.
+# The mod's own Steam Workshop item (KF2VR, KF2VRNet, KF2VRNetClient and
+# KF2VRHands), offered by a host so desktop players without the release can join.
+KF2VR_WORKSHOP_ID = "3815925510"
 DLSS_MODES = ("off", "dlaa", "quality", "balanced", "performance", "ultraperformance")
 
 
@@ -132,7 +135,7 @@ def load_preferences(args):
         args.portal_gun = saved.get("portal_gun", False) is True
     if getattr(args, "threaded_render", None) is None:
         args.threaded_render = saved.get("threaded_render", False) is True
-    for key in ("single_pass", "hbao", "reflections"):
+    for key in ("single_pass", "hbao", "reflections", "workshop_desktop"):
         if getattr(args, key, None) is None:
             setattr(args, key, saved.get(key, False) is True)
     if getattr(args, "dlss", None) is None:
@@ -196,6 +199,7 @@ def save_preferences(args):
         "single_pass": bool(getattr(args, "single_pass", False)),
         "hbao": bool(getattr(args, "hbao", False)),
         "reflections": bool(getattr(args, "reflections", False)),
+        "workshop_desktop": bool(getattr(args, "workshop_desktop", False)),
         "dlss": getattr(args, "dlss", None) or "off",
         "dlss_sharpness": int(getattr(args, "dlss_sharpness", None) or 0),
         "hide_bile_lens": getattr(args, "hide_bile_lens", True) is not False,
@@ -362,10 +366,28 @@ def prepare_content(args, game, steam_root):
 def configure_content(configs, args, *, server):
     from session import read_ini, set_ini
     content = getattr(args, "workshop_content", [])
-    if not content:
+    # A host can offer the mod itself through the Workshop, so desktop players
+    # with plain KF2 download it when they join.
+    offer_mod = server and getattr(args, "workshop_desktop", False) is True
+    if not content and not offer_mod:
         return
     path = Path(configs) / "KFEngine.ini"
     text = read_ini(path)
+    if content:
+        text = add_content_paths(text, content, set_ini)
+    if server:
+        items = [item["workshop_id"] for item in content] + ([KF2VR_WORKSHOP_ID] if offer_mod else [])
+        text = set_ini(text, "OnlineSubsystemSteamworks.KFWorkshopSteamworks", {
+            "ServerSubscribedWorkshopItems": items})
+    net = re.search(r"(?ims)^\[IpDrv\.TcpNetDriver\][^\n]*\n(.*?)(?=^\[|\Z)", text)
+    managers = re.findall(r"(?im)^DownloadManagers=([^\r\n]*)", net[1]) if net else []
+    workshop_manager = "OnlineSubsystemSteamworks.SteamWorkshopDownload"
+    text = set_ini(text, "IpDrv.TcpNetDriver", {"DownloadManagers": [workshop_manager] +
+        [value for value in managers if value.lower() != workshop_manager.lower()]})
+    path.write_text(text, encoding="utf-16")
+
+
+def add_content_paths(text, content, set_ini):
     section = re.search(r"(?ims)^\[Core\.System\][^\n]*\n(.*?)(?=^\[|\Z)", text)
     if not section:
         raise RuntimeError("Missing Core.System for Workshop content")
@@ -375,16 +397,7 @@ def configure_content(configs, args, *, server):
     localization = [str(Path(item["root"]) / "Localization") for item in content
                     if (Path(item["root"]) / "Localization").is_dir()]
     values["LocalizationPaths"] = localization + re.findall(r"(?im)^LocalizationPaths=([^\r\n]*)", section[1])
-    text = set_ini(text, "Core.System", values)
-    if server:
-        text = set_ini(text, "OnlineSubsystemSteamworks.KFWorkshopSteamworks", {
-            "ServerSubscribedWorkshopItems": [item["workshop_id"] for item in content]})
-    net = re.search(r"(?ims)^\[IpDrv\.TcpNetDriver\][^\n]*\n(.*?)(?=^\[|\Z)", text)
-    managers = re.findall(r"(?im)^DownloadManagers=([^\r\n]*)", net[1]) if net else []
-    workshop_manager = "OnlineSubsystemSteamworks.SteamWorkshopDownload"
-    text = set_ini(text, "IpDrv.TcpNetDriver", {"DownloadManagers": [workshop_manager] +
-        [value for value in managers if value.lower() != workshop_manager.lower()]})
-    path.write_text(text, encoding="utf-16")
+    return set_ini(text, "Core.System", values)
 
 
 def configure_mod_settings(role, args, game, user):

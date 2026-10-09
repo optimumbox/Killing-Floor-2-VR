@@ -753,6 +753,25 @@ function vector RackTarget()
     return RootLocation(vect(4,0,3));
 }
 
+// The part itself, without the sampled wrist offset.
+function vector RackHandle()
+{
+    local vector Position;
+    local quat Rotation;
+    if (MagazineProfileIndex < 0 && RackBone == '') return RootLocation(vect(4,0,3));
+    RackFrame(Position, Rotation);
+    return Position;
+}
+
+// Hand distance from the rack. Some reload animations rack from behind the gun
+// (the MP7), which puts the sampled wrist target in the shoulder of a player
+// using a physical stock, so a palm on the part itself also reaches it. Lead is
+// the part's motion and the pulling hand's lead, measured out of both.
+function float RackDistance(vector Wrist, vector Palm, vector Lead)
+{
+    return FMin(VSize(Wrist - RackTarget() - Lead), VSize(Palm - RackHandle() - Lead));
+}
+
 function float RackTravel()
 {
     local float AuthoredStroke;
@@ -2127,7 +2146,8 @@ function UpdateHand()
     else if (NeedsAmmo() && HandMode == 0)
     { NextZone = 1; ZoneTarget = BeltPosition(); ZoneRadius = BeltRadius; }
     if (NextZone != ZoneStep) { ZoneStep = NextZone; bInZone = false; }
-    if (NextZone != 0) bNearTarget = VSize((NextZone == 1 ? Palm : P) - ZoneTarget) <= ZoneRadius * (bInZone ? 1.25 : 1.0);
+    if (NextZone == 3) bNearTarget = RackDistance(P, Palm, vect(0,0,0)) <= ZoneRadius * (bInZone ? 1.25 : 1.0);
+    else if (NextZone != 0) bNearTarget = VSize((NextZone == 1 ? Palm : P) - ZoneTarget) <= ZoneRadius * (bInZone ? 1.25 : 1.0);
     if (bNearTarget && !bInZone) Pulse(1 << Hand, 0.1, 0.012);
     bInZone = bNearTarget;
 
@@ -2143,7 +2163,7 @@ function UpdateHand()
             }
             // Grab the slide. A pump is worked only by the support hand, which
             // is drawn gripping the fore-end.
-            if (!RackAvailable() || VSize(P - RackTarget()) > RackReach()) break;
+            if (!RackAvailable() || RackDistance(P, Palm, vect(0,0,0)) > RackReach()) break;
             bSupport = InputOwner.Inventory.Registry.GetSupport(Hand) == Runtime;
             if (!HandFree(Hand, true)) break;
             if (RackUsesSupport() ? bSupport : bGripEdge)
@@ -2206,9 +2226,9 @@ function UpdateHand()
             // Predict the current sample's moving contact before the exit check.
             // RackTarget still contains the previous frame's part position.
             ActionPull = bSlideLock ? FMin(LockPull + Pull, RackTravel()) : Pull;
-            if (bHeld && !bRackBySupport && VSize(P - RackTarget()
-                - RackPullDirection() * (ActionPull - RackPull)
-                - RackPullDirection() * FMax(RackStartX - AlongBore(P) - Pull, 0)) > RackReach() * ExitInflation)
+            if (bHeld && !bRackBySupport && RackDistance(P, Palm,
+                RackPullDirection() * (ActionPull - RackPull)
+                + RackPullDirection() * FMax(RackStartX - AlongBore(P) - Pull, 0)) > RackReach() * ExitInflation)
             {
                 bHeld = false;
                 Pulse(1 << Hand, 0.1, 0.012);
@@ -3763,9 +3783,9 @@ defaultproperties
     LastReleasedProp=-1
     IdleGripMask=3
     BeltOffset=(X=12,Y=-14,Z=-24)
-    BeltRadius=14
+    BeltRadius=18
     SnapRadius=8
-    RackRadius=12
+    RackRadius=16
     SlideTravel=3.2
     PumpTravel=7
     PauseLead=0.05

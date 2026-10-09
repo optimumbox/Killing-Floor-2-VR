@@ -178,6 +178,26 @@ def cleanup_order(owned, avatar_preview=False):
     return ordered
 
 
+def disable_mouse_look(text):
+    """VR: the desktop mouse must not turn the camera. In the isolated input
+    copy, MouseX/MouseY keep their counters but lose the aMouseX/aMouseY look
+    axes; buttons and the wheel are unchanged."""
+    def strip(match):
+        row = match.group()
+        if not re.search(r'(?i)\bName\s*=\s*"?Mouse[XY]"?\s*[,)]', row):
+            return row
+        def command(found):
+            parts = [p.strip() for p in found.group(2).split("|")]
+            kept = [p for p in parts if not re.match(r"(?i)Axis\s+aMouse[XY]\b", p)]
+            return found.group(1) + " | ".join(kept) + found.group(3)
+        return re.sub(r'(?i)(\bCommand\s*=\s*")([^"]*)(")', command, row)
+    for section in ("Engine.PlayerInput", "KFGame.KFPlayerInput"):
+        pattern = re.compile(r"(?ims)^[ \t]*\[" + re.escape(section) + r"\][^\r\n]*(?:\r?\n|$).*?(?=^[ \t]*\[|\Z)")
+        text = pattern.sub(lambda block: re.sub(
+            r"(?im)^[ \t]*[+.-]?Bindings\s*=[^\r\n]*", strip, block.group()), text)
+    return text
+
+
 def preview_camera_binding(text, command="KF2VRAvatarToggleCamera"):
     """Change only unmodified F8 in the isolated input copy; retain array rows."""
     if command not in ("KF2VRAvatarToggleCamera", "KF2VRThirdPersonToggle"):
@@ -395,6 +415,9 @@ def configure_role(run, name, user, game, args):
             if path.exists():
                 path.write_text(preview_camera_binding(read_ini(path), f8_command), encoding="utf-16", newline="")
         if args.vr:
+            path = configs / "KFInput.ini"
+            if path.exists():
+                path.write_text(disable_mouse_look(read_ini(path)), encoding="utf-16", newline="")
             path = configs / "KFEngine.ini"
             path.write_text(set_ini(read_ini(path), "Engine.Engine", {
                 "GameViewportClientClassName": "KF2VRNetClient.KF2VRNetViewportClient",
@@ -550,6 +573,9 @@ def parse_options(argv=None):
                         help="HBAO+ ambient occlusion (saved, initially off); VR")
     parser.add_argument("--reflections", action=argparse.BooleanOptionalAction, default=None,
                         help="Screen-space reflections (saved, initially off); VR")
+    parser.add_argument("--workshop-desktop", action=argparse.BooleanOptionalAction, default=None,
+                        help="Host: desktop players with plain KF2 download the mod from its Steam Workshop "
+                             "item when they join (saved, initially off)")
     parser.add_argument("--single-pass", action=argparse.BooleanOptionalAction, default=None,
                         help="Experimental: render both eyes in one scene submission (Steam; saved, initially off); VR")
     parser.add_argument("--threaded-render", action=argparse.BooleanOptionalAction, default=None,
