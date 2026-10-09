@@ -38,6 +38,13 @@ class WorkshopDesktopTest(unittest.TestCase):
         self.assertLess(text.index("ServerSubscribedWorkshopItems=2875147606"),
                         text.index("ServerSubscribedWorkshopItems=" + KF2VR_WORKSHOP_ID))
 
+    def managers(self):
+        return [line.split("=", 1)[1] for line in self.engine().splitlines() if line.startswith("DownloadManagers=")]
+
+    def test_workshop_stays_first(self):
+        configure_content(self.configs, SimpleNamespace(workshop_content=[], workshop_desktop=True), server=True)
+        self.assertEqual(self.managers(), ["OnlineSubsystemSteamworks.SteamWorkshopDownload", "Engine.ChannelDownload"])
+
     def test_off_or_client_leaves_config_alone(self):
         configure_content(self.configs, SimpleNamespace(workshop_content=[], workshop_desktop=False), server=True)
         configure_content(self.configs, SimpleNamespace(workshop_content=[], workshop_desktop=True), server=False)

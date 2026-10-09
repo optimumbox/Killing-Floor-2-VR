@@ -240,6 +240,14 @@ maps receive `?FakePlayers=0`. UKFP fakes the player count for health and other
 difficulty/population calculations; it is broader than CD's individual HP flags.
 The game remains `KF2VRNet.KF2VRNetGame`. No undocumented test-map menu is added.
 
+## Epic Games players
+
+The Epic copy of KF2 cannot use the Steam Workshop, and it does not load mod
+packages from its download cache, so automatic downloads cannot work for it. Epic
+players copy `KF2VR.u`, `KF2VRNet.u` and `KF2VRHands.upk` (the Epic pack ZIP) into
+`KFGame\BrewedPC\KF2VR\` of their KF2 install once, and again after each update.
+Tested on a Steam Deck (Heroic) joining a Steam-hosted dedicated server.
+
 ## Workshop mods and maps
 
 Launcher option **8. Mods** toggles UKFP and its optional dependency features,
@@ -346,7 +354,8 @@ All public packaged CLI switches:
 | `--headset-preset` | None | Provisional quest2/quest3/quest3s/index/high-resolution bundle; explicit quality/scale wins. Resulting settings remembered; VR only. |
 | `--vr-quality` | Saved; initially performance | quality/balanced/performance; rejected with `--desktop`. |
 | `--eye-render-percent` | Saved value, initially 75 | Integer 50-100; requires VR, overrides saved scale. |
-| `--open-server` / `--no-open-server` | Saved; initially Off | Host only. Hosts without a server password: anyone who reaches the server can join, and the join code carries no password. The saved host password is kept for later protected sessions. A join with no password only accepts a server without one, and a join with a password only a protected one; VAC must be off either way. Window: Host > Extras. |
+| `--server-name` | Saved; initially KF2-VR Server | Host only. Name shown in the server browser (1-48 letters, numbers, spaces or . , ' ! & ( ) + _ -). Window: Host > Server. |
+| `--open-server` / `--no-open-server` | Saved; initially Off | Host only. Hosts without a server password: anyone who reaches the server can join, and the join code carries no password. The saved host password is kept for later protected sessions. A join with no password only accepts a server without one, and a join with a password only a protected one; VAC must be off either way. Window: leave Host > Server > Password blank. |
 | `--workshop-desktop` / `--no-workshop-desktop` | Saved; initially Off | Host only. Lists the mod's Steam Workshop item ([3815925510](https://steamcommunity.com/sharedfiles/filedetails/?id=3815925510): KF2VR, KF2VRNet, KF2VRNetClient and KF2VRHands) in the server's `ServerSubscribedWorkshopItems`, with Steam's Workshop downloader first, so desktop players with plain KF2 download the mod when they join. The item must hold the same packages as the host. Window: Host > Extras. |
 | `--frame-timings` | Off | VR only. Writes CPU stage and GPU frame times to the session's native.log every 5 s; low overhead. It also turns on the adapter's periodic status lines (every 300th event of a kind; otherwise only the first five are logged). Without it the adapter writes no periodic diagnostics; `-kf2vr-verbose-log` restores the lite `FramePacing` line every 5 s (present intervals: mean, p50/p95/p99, frames over 11.1 and 8.3 ms) and the periodic lines without stage timers. The launcher still records the game's peak working set; both feed the Save-logs summary. Packaged menu: Troubleshooting > Performance log. Main launcher: `-FrameTimings`. |
 | `--threaded-render` / `--no-threaded-render` | Saved; initially Off | Experimental, VR only. Replaces `-onethread` with UE3's render thread, so game and render work overlap. The portal gun's see-through view works only one-threaded; with threaded rendering its portals show a flat fill. With `--frame-timings`, the logged stages are the render thread's only: compare frame intervals, not busy ms. Main launcher: `-ThreadedRender On`. |

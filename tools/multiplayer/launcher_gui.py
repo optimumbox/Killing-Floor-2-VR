@@ -129,6 +129,17 @@ def friendly(message):
     return next((text for key, text in FRIENDLY_ERRORS if key in message), message or "Something went wrong.")
 
 
+def host_identity():
+    """The saved server name and host password from this release's settings."""
+    try:
+        saved = json.loads((ROOT / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        saved = {}
+    if not isinstance(saved, dict):
+        saved = {}
+    return str(saved.get("server_name") or "KF2-VR Server"), str(saved.get("host_password") or "")
+
+
 def game_folder(store="auto"):
     settings = ROOT / "settings.json"
     try:
@@ -633,14 +644,23 @@ class Launcher(tk.Tk):
             self.label(frame, "Saved; Join uses the last choice.",
                        "small", DIM, wraplength=self.px(600)).pack(anchor="w")
         if not solo:
+            self.section(frame, "Server")
+            saved_name, saved_password = host_identity()
+            server_name = tk.StringVar(value=saved_name)
+            server_password = tk.StringVar(value="" if getattr(self.saved, "open_server", False) else saved_password)
+            grid = self.form(frame)
+            for index, (text, variable) in enumerate((("Server name", server_name), ("Password", server_password))):
+                self.label(grid, text.upper(), "label", DIM).grid(row=index, column=0, sticky="w", pady=self.px(5))
+                ttk.Entry(grid, textvariable=variable, width=30, font=self.f_body).grid(
+                    row=index, column=1, sticky="w", pady=self.px(5))
+            self.label(frame, "Leave the password blank for no password: anyone who finds the server can join.",
+                       "small", DIM, wraplength=self.px(600)).pack(anchor="w")
             self.section(frame, "Extras (optional)")
             for key, text, value in (
                     ("grabs", "VR players can grab Zeds (experimental)", self.saved.multiplayer_grabs),
                     ("focus", "Slow time while a VR player picks a weapon (experimental)", self.saved.inventory_focus),
                     ("workshop_desktop", "Desktop players without KF2-VR can join (mod downloads from the Steam Workshop)",
-                     getattr(self.saved, "workshop_desktop", False)),
-                    ("open_server", "No server password (anyone who finds the server can join)",
-                     getattr(self.saved, "open_server", False))):
+                     getattr(self.saved, "workshop_desktop", False))):
                 extras[key] = tk.BooleanVar(value=bool(value))
                 ttk.Checkbutton(frame, text=text, variable=extras[key]).pack(anchor="w")
             self.label(frame, "Mods - everyone downloads them automatically", "small", DIM).pack(anchor="w", pady=(self.px(8), self.px(2)))
@@ -692,7 +712,15 @@ class Launcher(tk.Tk):
                 arguments.append("--multiplayer-grabs" if extras["grabs"].get() else "--no-multiplayer-grabs")
                 arguments.append("--inventory-focus" if extras["focus"].get() else "--no-inventory-focus")
                 arguments.append("--workshop-desktop" if extras["workshop_desktop"].get() else "--no-workshop-desktop")
-                arguments.append("--open-server" if extras["open_server"].get() else "--no-open-server")
+                name, secret = server_name.get().strip(), server_password.get().strip()
+                if not re.fullmatch(r"[A-Za-z0-9 .,'!&()+_-]{1,48}", name):
+                    messagebox.showerror("Server name", "Use 1-48 letters, numbers, spaces or . , ' ! & ( ) + _ -")
+                    return
+                if secret and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", secret):
+                    messagebox.showerror("Password", "Use letters, numbers, underscore or hyphen (up to 64), or leave it blank.")
+                    return
+                arguments += ["--server-name", name]
+                arguments += ["--no-open-server", "--password", secret] if secret else ["--open-server"]
                 chosen = [key for key in MODS if extras["mod:" + key].get()]
                 arguments += ["--mods", ",".join(chosen) or "none"]
             else:
@@ -968,7 +996,7 @@ class Launcher(tk.Tk):
         self.combo(grid, fields, "Turning", {"True": "Snap turn", "False": "Smooth turn"},
                    session.get("bSnapTurn", "True").capitalize())
         self.combo(grid, fields, "Render scale", {str(n): f"{n}%" for n in range(100, 49, -5)},
-                   session.get("EyeRenderPercent", "75"))
+                   session.get("EyeRenderPercent", "100"))
         self.label(frame, "Shared with Play solo / Host and in-game VR Controls > Graphics.",
                    "small", DIM, wraplength=self.px(600)).pack(anchor="w")
         self.section(frame, "Other")

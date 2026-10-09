@@ -40,7 +40,7 @@ Steam Solo has had the most developer headset testing, using Quest over Link.
 The developer has also tested remote joining of a hosted server and
 install/recovery. This is an early alpha; broader hardware, complete matches,
 remote gestures, travel and arsenal coverage need feedback. Defaults are
-Performance graphics, 75% render scale and Button reloads. Saved preferences win.
+Performance graphics, 100% render scale and Button reloads. Saved preferences win.
 
 Begin with [READ ME FIRST](docs/public-alpha/READ-ME-FIRST.txt), the
 [quick controls card](docs/public-alpha/CONTROLS-CARD.txt) and

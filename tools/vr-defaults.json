@@ -62,7 +62,7 @@
   "bSnapTurn": "True",
   "SnapTurnDegrees": "30",
   "SmoothTurnScale": "0.5",
-  "EyeRenderPercent": "75",
+  "EyeRenderPercent": "100",
   "MenuBackdropMode": "0",
   "LocalMap": "KF-BurningParis",
   "LocalDifficulty": "0",

@@ -60,6 +60,16 @@ class VisualRolesTests(unittest.TestCase):
         self.assertEqual(before, config_hashes(user))
         return roles
 
+    def test_server_name_lands_in_game_settings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            roles = self.prepare(Path(directory), vr=True, replay=False, server_name="Test Server")
+            configs = Path(roles["server"]["config_root"])
+            engine, game = read_ini(configs / "KFEngine.ini"), read_ini(configs / "KFGame.ini")
+            self.assertIn("Paths=stock", engine)
+            self.assertNotIn("[Engine.AccessControl]", engine)
+            self.assertIn("ServerName=Test Server", game)
+            self.assertIn("GamePassword=visual-test", game)
+
     def settings(self, role):
         return read_ini(Path(role["config_root"]) / "KFGame.ini")
 
@@ -247,7 +257,7 @@ class VisualRolesTests(unittest.TestCase):
                     self.assertNotIn("kf2vr_eye_render_percent", environment)
                     self.assertNotIn("Kf2Vr_HAND_REPLAY", environment)
                     if name == "driver":
-                        self.assertEqual(75 if selected is None else selected, role["eye_render_percent"])
+                        self.assertEqual(100 if selected is None else selected, role["eye_render_percent"])
                         self.assertEqual(str(role["eye_render_percent"]), environment["KF2VR_EYE_RENDER_PERCENT"])
                     else:
                         self.assertNotIn("eye_render_percent", role)

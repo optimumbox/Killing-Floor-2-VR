@@ -198,6 +198,10 @@ def disable_mouse_look(text):
     return text
 
 
+DEFAULT_SERVER_NAME = "KF2-VR Server"
+SERVER_NAME_PATTERN = r"[A-Za-z0-9 .,'!&()+_-]{1,48}"
+
+
 def preview_camera_binding(text, command="KF2VRAvatarToggleCamera"):
     """Change only unmodified F8 in the isolated input copy; retain array rows."""
     if command not in ("KF2VRAvatarToggleCamera", "KF2VRThirdPersonToggle"):
@@ -368,6 +372,8 @@ def configure_role(run, name, user, game, args):
     if name == "server":
         # Persist host capability through ordinary map travel. Individual
         # desktop players keep stock weapons; VR owners opt in via tracking.
+        text = set_ini(text, "Engine.GameReplicationInfo", {
+            "ServerName": getattr(args, "server_name", None) or DEFAULT_SERVER_NAME})
         text = set_ini(text, "KF2VRNet.KF2VRNetGame", {
             "bServerAdapter": "true", "bIndependentWeapons": "false" if replay and not locomotion else "true",
             "bInventoryFocusEnabled": "true" if getattr(args, "inventory_focus", False) else "false",
@@ -574,6 +580,8 @@ def parse_options(argv=None):
                         help="HBAO+ ambient occlusion (saved, initially off); VR")
     parser.add_argument("--reflections", action=argparse.BooleanOptionalAction, default=None,
                         help="Screen-space reflections (saved, initially off); VR")
+    parser.add_argument("--server-name", help="Host: name shown in the server browser (saved; initially "
+                        + DEFAULT_SERVER_NAME + ")")
     parser.add_argument("--open-server", action=argparse.BooleanOptionalAction, default=None,
                         help="Host without a server password: anyone who reaches the server can join "
                              "(saved, initially off)")
@@ -764,6 +772,11 @@ def main():
         args.mods = []
     elif args.host:
         args.address = "127.0.0.1"
+        args.server_name = (args.server_name if args.server_name is not None
+                            else saved.get("server_name", DEFAULT_SERVER_NAME)).strip()
+        if not re.fullmatch(SERVER_NAME_PATTERN, args.server_name):
+            raise RuntimeError("Use a server name of 1-48 letters, numbers, spaces or . , ' ! & ( ) + _ -")
+        saved["server_name"] = args.server_name
         if getattr(args, "open_server", False) is True:
             # No password: anyone who reaches the server can join. The saved
             # password stays for the next protected session.

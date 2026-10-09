@@ -26,7 +26,7 @@ This is an early alpha, tested so far on one developer PC with a Quest
 headset over Link. Solo play is the most tested path. The developer has also
 used a remotely joined hosted server; wider internet and hardware coverage
 need feedback. Expect bugs, and please
-report them. The default graphics are Performance at 75% render scale;
+report them. The default graphics are Performance at 100% render scale;
 raise them in Settings or the headset menu if your PC has headroom.
 The questions we most want answered are in app\docs\FEEDBACK-QUESTIONS.md.
 
