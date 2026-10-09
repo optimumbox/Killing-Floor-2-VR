@@ -638,7 +638,9 @@ class Launcher(tk.Tk):
                     ("grabs", "VR players can grab Zeds (experimental)", self.saved.multiplayer_grabs),
                     ("focus", "Slow time while a VR player picks a weapon (experimental)", self.saved.inventory_focus),
                     ("workshop_desktop", "Desktop players without KF2-VR can join (mod downloads from the Steam Workshop)",
-                     getattr(self.saved, "workshop_desktop", False))):
+                     getattr(self.saved, "workshop_desktop", False)),
+                    ("open_server", "No server password (anyone who finds the server can join)",
+                     getattr(self.saved, "open_server", False))):
                 extras[key] = tk.BooleanVar(value=bool(value))
                 ttk.Checkbutton(frame, text=text, variable=extras[key]).pack(anchor="w")
             self.label(frame, "Mods - everyone downloads them automatically", "small", DIM).pack(anchor="w", pady=(self.px(8), self.px(2)))
@@ -690,6 +692,7 @@ class Launcher(tk.Tk):
                 arguments.append("--multiplayer-grabs" if extras["grabs"].get() else "--no-multiplayer-grabs")
                 arguments.append("--inventory-focus" if extras["focus"].get() else "--no-inventory-focus")
                 arguments.append("--workshop-desktop" if extras["workshop_desktop"].get() else "--no-workshop-desktop")
+                arguments.append("--open-server" if extras["open_server"].get() else "--no-open-server")
                 chosen = [key for key in MODS if extras["mod:" + key].get()]
                 arguments += ["--mods", ",".join(chosen) or "none"]
             else:
@@ -757,7 +760,7 @@ class Launcher(tk.Tk):
             arguments = ["--vr" if self.vr.get() else "--desktop", "--game-root", str(game)]
             if text.startswith("KF2VR1:"):
                 arguments += ["--address", text]
-            elif not text and re.fullmatch(r"[A-Za-z0-9.-]+", host) and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", secret):
+            elif not text and re.fullmatch(r"[A-Za-z0-9.-]+", host) and re.fullmatch(r"[A-Za-z0-9_-]{0,64}", secret):
                 arguments += ["--address", host, "--password", secret]
             else:
                 messagebox.showwarning("Check the code", "Paste the whole code from your friend. It starts with KF2VR1:")

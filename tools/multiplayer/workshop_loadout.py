@@ -135,7 +135,7 @@ def load_preferences(args):
         args.portal_gun = saved.get("portal_gun", False) is True
     if getattr(args, "threaded_render", None) is None:
         args.threaded_render = saved.get("threaded_render", False) is True
-    for key in ("single_pass", "hbao", "reflections", "workshop_desktop"):
+    for key in ("single_pass", "hbao", "reflections", "workshop_desktop", "open_server"):
         if getattr(args, key, None) is None:
             setattr(args, key, saved.get(key, False) is True)
     if getattr(args, "dlss", None) is None:
@@ -200,6 +200,7 @@ def save_preferences(args):
         "hbao": bool(getattr(args, "hbao", False)),
         "reflections": bool(getattr(args, "reflections", False)),
         "workshop_desktop": bool(getattr(args, "workshop_desktop", False)),
+        "open_server": bool(getattr(args, "open_server", False)),
         "dlss": getattr(args, "dlss", None) or "off",
         "dlss_sharpness": int(getattr(args, "dlss_sharpness", None) or 0),
         "hide_bile_lens": getattr(args, "hide_bile_lens", True) is not False,

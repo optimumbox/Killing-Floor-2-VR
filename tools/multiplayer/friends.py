@@ -381,7 +381,8 @@ def configure_role(run, name, user, game, args):
     path.write_text(text, encoding="utf-16")
     server_url = host_url(args)
     role["args"][0] = (server_url
-                        if name == "server" else f"{args.address}:{args.port}?Password={args.password}" + breacher.options(args))
+                        if name == "server" else f"{args.address}:{args.port}"
+                        + (f"?Password={args.password}" if args.password else "") + breacher.options(args))
     if name == "server" and replay and not test_map:
         role["args"][0] += "?VRNetDiagnostics=1?VRNetAutoReady=1?VRNet9mm=1?VRNetClients=2"
         if not args.replay_match:
@@ -573,6 +574,9 @@ def parse_options(argv=None):
                         help="HBAO+ ambient occlusion (saved, initially off); VR")
     parser.add_argument("--reflections", action=argparse.BooleanOptionalAction, default=None,
                         help="Screen-space reflections (saved, initially off); VR")
+    parser.add_argument("--open-server", action=argparse.BooleanOptionalAction, default=None,
+                        help="Host without a server password: anyone who reaches the server can join "
+                             "(saved, initially off)")
     parser.add_argument("--workshop-desktop", action=argparse.BooleanOptionalAction, default=None,
                         help="Host: desktop players with plain KF2 download the mod from its Steam Workshop "
                              "item when they join (saved, initially off)")
@@ -760,8 +764,13 @@ def main():
         args.mods = []
     elif args.host:
         args.address = "127.0.0.1"
-        args.password = args.password or saved.get("host_password") or secrets.token_hex(4)
-        saved["host_password"] = args.password
+        if getattr(args, "open_server", False) is True:
+            # No password: anyone who reaches the server can join. The saved
+            # password stays for the next protected session.
+            args.password = ""
+        else:
+            args.password = args.password or saved.get("host_password") or secrets.token_hex(4)
+            saved["host_password"] = args.password
     else:
         args.address = args.address or input(f"Paste join code (or host address) [{saved.get('address', '')}]: ").strip() or saved.get("address", "")
         if args.address.startswith(join_code.PREFIX):
@@ -776,11 +785,12 @@ def main():
             args.test_map = args.map == MAP_NAME
             print("Join code accepted. Host connection and content settings applied.", flush=True)
         else:
-            args.password = args.password or input("Session password: ").strip()
+            if args.password is None:
+                args.password = input("Session password (Enter for none): ").strip()
     if not re.fullmatch(r"[a-zA-Z0-9.-]+", args.address or ""):
         raise RuntimeError("Enter the host IP address or hostname, without a port or URL.")
-    if not re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", args.password or ""):
-        raise RuntimeError("Use a session password containing letters, numbers, underscore or hyphen.")
+    if not re.fullmatch(r"[a-zA-Z0-9_-]{0,64}", args.password or ""):
+        raise RuntimeError("Use a session password containing letters, numbers, underscore or hyphen, or none.")
     breacher.prepare(args, ROOT, manifest)
     if args.breacher:
         print("Breacher ON: experimental Deadbolt/Cascade; all players require matching local content. No automatic download.", flush=True)
@@ -942,8 +952,11 @@ def main():
                     info = query_server(args.address, args.query_port)
                     if info["secure"]:
                         raise RuntimeError("Server reports VAC enabled. This prototype requires the KF2-VR VAC-off host.")
-                    if info["folder"] != "kf2" or not info["password"]:
-                        raise ValueError("Expected a password-protected KF2 server")
+                    # A password, when given, must be required by the server;
+                    # no password only joins a server that has none.
+                    if info["folder"] != "kf2" or info["password"] != bool(args.password):
+                        raise ValueError("Expected a password-protected KF2 server" if args.password
+                                         else "Expected a KF2 server without a password")
                     if server and "OnServerDataUpdateResponse complete successfully" not in log_text(roles[0]):
                         raise ValueError("Server registration is still starting")
                     record["server_query"] = info
@@ -961,7 +974,7 @@ def main():
             save()
             deployment.install()
         if args.host:
-            print(f"Host ready. Session password: {args.password}\nFriends use your LAN/VPN/public address. Game UDP {args.port}; query UDP {args.query_port}.", flush=True)
+            print(f"Host ready. Session password: {args.password or '(none: anyone can join)'}\nFriends use your LAN/VPN/public address. Game UDP {args.port}; query UDP {args.query_port}.", flush=True)
             address = args.share_address or join_code.public_address(log_text(roles[0]))
             if address:
                 code = join_code.encode(dict(address=address, password=args.password, port=args.port,
@@ -971,7 +984,8 @@ def main():
                     "\n\nUnzip it, open Start KF2-VR, click Join a friend and paste the code. "
                     "Keep the KF2-VR window open while playing.\n\n"
                     f"Host: forward UDP {args.port} and UDP {args.query_port} to your PC for internet play. "
-                    "This code contains the session password; share it privately. "
+                    + ("This code contains the session password; share it privately. " if args.password else
+                       "This server has no password: anyone who reaches it can join. ") +
                     "Generating a code does not verify internet reachability.\n")
                 (ROOT / "JOIN-SERVER.txt").write_text(instructions, encoding="utf-8")
                 print(instructions + "Copy/share instructions from: " + str(ROOT / "JOIN-SERVER.txt"), flush=True)
