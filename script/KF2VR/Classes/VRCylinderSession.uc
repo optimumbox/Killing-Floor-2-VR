@@ -19,6 +19,8 @@ var quat SeatRel_Q;
 var name CylinderBone;
 var vector LoaderOffset;
 var float SeatRadius, SeatAbove, OpenTime, CloseTime;
+var float TouchRadius, TorsoRadius, ForearmLength;
+var vector ShoulderOffset;
 
 static function bool Covers(KFWeapon W)
 {
@@ -233,6 +235,48 @@ function ShowRounds(bool bShow)
     }
 }
 
+static function float SegmentDistance(vector P, vector A, vector B)
+{
+    local vector AB;
+    local float T;
+    AB = B - A;
+    T = VSizeSq(AB) > 0.01 ? FClamp(((P - A) dot AB) / VSizeSq(AB), 0, 1) : 0.0;
+    return VSize(P - (A + AB * T));
+}
+
+// The open cylinder knocked against the body: the torso, the other hand or
+// arm, or the other gun. Any of them loads it, as the hip does.
+function bool Touching(vector P)
+{
+    local int Other;
+    local vector Hand, Elbow, Shoulder, Pivot, Root;
+    local quat Q;
+    local VRWeaponRuntime R;
+    Other = 1 - GunHand;
+    Pivot = Bridge.BodyPivot();
+    if (VSize((P - Pivot) * vect(1,1,0)) <= TorsoRadius && P.Z <= Pivot.Z && P.Z >= Pivot.Z - 80) return true;
+    if ((Bridge.NativeValidMask & (1 << Other)) != 0)
+    {
+        Hand = Bridge.Hands[Other].Position;
+        Elbow = Hand - vector(Other == 0 ? Bridge.LeftRotation : Bridge.RightRotation) * ForearmLength;
+        Shoulder = ShoulderOffset;
+        if (Other == 1) Shoulder.Y = -Shoulder.Y;
+        Shoulder = Pivot + (Shoulder >> Bridge.BodyYaw());
+        if (VSize(P - Hand) <= TouchRadius || SegmentDistance(P, Hand, Elbow) <= TouchRadius
+            || SegmentDistance(P, Elbow, Shoulder) <= TouchRadius) return true;
+    }
+    R = Owner.InputOwner.Inventory.Registry.GetPrimary(Other);
+    if (R != None && R.Item != None && R.Item != Gun && R.Item.MySkelMesh != None
+        && R.Item.MySkelMesh.MatchRefBone('RW_Weapon') >= 0)
+    {
+        Root = R.Item.MySkelMesh.GetBoneLocation('RW_Weapon');
+        Q = R.Item.MySkelMesh.GetBoneQuaternion('RW_Weapon');
+        if (SegmentDistance(P, Root - QuatRotateVector(Q, vect(8,0,0)), Root + QuatRotateVector(Q, vect(28,0,0))) <= TouchRadius)
+            return true;
+    }
+    return false;
+}
+
 function bool StillValid()
 {
     return Gun != None && !Gun.bDeleteMe && Gun.MySkelMesh != None && Runtime != None
@@ -267,7 +311,8 @@ function Tick()
         // loads it. Dropping the guns to the hips is enough.
         HipLoader(At, Q);
         Target = Gun.MySkelMesh.GetBoneLocation(CylinderBone);
-        if (VSize((Target - At) * vect(1,1,0)) <= SeatRadius && Target.Z - At.Z <= SeatAbove)
+        if ((VSize((Target - At) * vect(1,1,0)) <= SeatRadius && Target.Z - At.Z <= SeatAbove)
+            || Touching(Target))
         {
             bSeated = true;
             Loader.SetHidden(true);
@@ -376,6 +421,11 @@ defaultproperties
     LoaderOffset=(X=8,Y=-24,Z=-30)
     SeatRadius=26
     SeatAbove=14
+    TouchRadius=12
+    TorsoRadius=20
+    ForearmLength=28
+    // From the body pivot (base of the neck): the left shoulder.
+    ShoulderOffset=(X=0,Y=-18,Z=-6)
     OpenTime=0.25
     CloseTime=0.12
 }

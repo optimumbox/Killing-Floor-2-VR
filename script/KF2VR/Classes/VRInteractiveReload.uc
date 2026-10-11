@@ -2076,6 +2076,14 @@ function GateTimers(float Delta)
     local bool Ready;
     local name AmmoGate;
     if (bPartialShellClose || TryCloseBreakReload() || TryCloseShellReload()) return;
+    if (CylinderClipReload())
+    {
+        // The stock clip waits from the start: the loader can be taken as
+        // soon as the cylinder is open, and closing it ends the reload.
+        if (TryCloseCylinderReload()) return;
+        if (!bTimersPaused) { bAwaitAmmo = true; PauseStock(); }
+        return;
+    }
     Lead = FMax(PauseLead, 2 * Delta);
     if (LeverHold != 0) { if (!bTimersPaused) PauseStock(); return; }
     Cost = 1;
@@ -2140,6 +2148,35 @@ function GateTimers(float Delta)
             SetRackPull(LockPull);
         }
     }
+}
+
+// A revolver loaded from a speedloader or a whole cylinder: one clip, one seat.
+function bool CylinderClipReload()
+{
+    return BreakAction.Gun == Gun && BreakAction.bClip && BreakAction.bCylinder
+        && !bBreakInspection && BreakAction.BeltPath == None;
+}
+
+// Loaded and closed: credit the stock reload now and skip the rest of its clip.
+function bool TryCloseCylinderReload()
+{
+    if (!BreakAction.bClosed || BreakAction.SeatedShells < BreakAction.RequiredShells
+        || Credits < BreakAction.RequiredShells) return false;
+    Credits -= BreakAction.RequiredShells;
+    Gun.ClearTimer('ReloadAmmoTimer');
+    Gun.ClearTimer('ReloadStatusTimer');
+    ResumeStock();
+    Gun.PerformReload();
+    bAwaitAmmo = false;
+    bAmmoStepPaid = false;
+    Gun.ReloadComplete();
+    if (Gun.IsInState('Active'))
+    {
+        if (Gun.IdleAnims.Length > 0) Gun.PlayAnimation(Gun.IdleAnims[0], 0.0, true, 0.0);
+        Gun.ToggleAdditiveBobAnim(!Gun.bUsingSights);
+    }
+    Finish("cylinder-closed");
+    return true;
 }
 
 // A manually closed single-round break action pays only the shells seated.
