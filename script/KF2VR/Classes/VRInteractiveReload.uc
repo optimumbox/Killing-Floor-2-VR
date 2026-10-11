@@ -522,6 +522,28 @@ function bool TryDualCylinder(VRWeaponRuntime R, int Hand)
     return bStarted;
 }
 
+// Stock can start a reload by itself (firing an empty gun). With a revolver
+// in each hand, that reload becomes the physical one too, never the clip.
+function AdoptDualReloads()
+{
+    local VRWeaponRuntime Held[2];
+    local int H;
+    if (!Enabled() || bActive || DualCylinders[0] == None || !InputOwner.ContextValid()) return;
+    for (H = 0; H < 2; ++H)
+    {
+        Held[H] = InputOwner.Inventory.Registry.GetPrimary(H);
+        if (Held[H] == None || !Held[H].IsCurrent() || !class'VRCylinderSession'.static.Covers(Held[H].Item)) return;
+    }
+    if (Held[0] == Held[1]) return;
+    for (H = 0; H < 2; ++H)
+    {
+        if (DualCylinders[H].FailedGun != None && !DualCylinders[H].FailedGun.IsInState('Reloading'))
+            DualCylinders[H].FailedGun = None;
+        if (!DualCylinders[H].Active() && MagazineReloading(Held[H].Item))
+            DualCylinders[H].Begin(Held[H], H);
+    }
+}
+
 function bool DualCylinderOwns(KFWeapon W)
 {
     return W != None && ((DualCylinders[0] != None && DualCylinders[0].Gun == W)
@@ -1701,6 +1723,7 @@ function Update(float Delta)
     if (BreakAction != None) BreakAction.Update();
     if (DualCylinders[0] != None) DualCylinders[0].Tick();
     if (DualCylinders[1] != None) DualCylinders[1].Tick();
+    AdoptDualReloads();
     UpdateSlideLocks();
     CountBlockedTriggers();
     if (!bActive)

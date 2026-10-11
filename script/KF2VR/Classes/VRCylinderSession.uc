@@ -13,6 +13,7 @@ var bool bSpeedloader, bOpened, bSeated, bClosed, bTimersPaused, bSavedPauseAnim
 var float Amount, LastTime;
 var StaticMeshComponent Loader;
 var name LoaderMeshFor;
+var KFWeapon FailedGun;
 // The seated loader in the cylinder's frame, from the clip's seating moment.
 var vector SeatRel;
 var quat SeatRel_Q;
@@ -36,10 +37,18 @@ function bool Begin(VRWeaponRuntime R, int Hand)
     local int I;
     if (Gun != None || R == None || !Covers(R.Item) || R.Item.MySkelMesh == None) return false;
     Profile = class'VRBreakCatalog'.static.FindClass(R.Item.Class);
-    if (Profile < 0 || !R.Item.CanReload()) return false;
-    R.StartAction(class'KFWeapon'.const.RELOAD_FIREMODE);
-    R.Item.StopFire(class'KFWeapon'.const.RELOAD_FIREMODE);
-    if (!R.Item.IsInState('Reloading')) return false;
+    if (Profile < 0) return false;
+    // A reload stock already started (the empty gun's automatic reload) is
+    // taken over as it is; otherwise this press starts one.
+    if (!R.Item.IsInState('Reloading'))
+    {
+        if (!R.Item.CanReload()) return false;
+        R.StartAction(class'KFWeapon'.const.RELOAD_FIREMODE);
+        R.Item.StopFire(class'KFWeapon'.const.RELOAD_FIREMODE);
+        if (!R.Item.IsInState('Reloading')) return false;
+    }
+    else if (R.Item == FailedGun) return false;
+    FailedGun = None;
     Gun = R.Item; Runtime = R; GunHand = Hand;
     RootBone = 'RW_Weapon';
     if (R.Presenter != None && R.Presenter.ActiveProfile >= 0)
@@ -345,9 +354,11 @@ function Complete()
     Unbind();
 }
 
-// Interrupted: hand the reload back to stock with the gun as it was.
+// Interrupted: hand the reload back to stock with the gun as it was. That
+// reload is not taken over again (stock finishes it).
 function Abort(string Reason)
 {
+    FailedGun = Gun;
     if (Gun != None)
         `log("KF2VR_DUAL_CYLINDER phase=abort reason=" $ Reason @ "weapon=" $ Gun.Class @ "hand=" $ GunHand);
     if (Gun != None && !Gun.bDeleteMe && Gun.MySkelMesh != None) ShowRounds(true);
