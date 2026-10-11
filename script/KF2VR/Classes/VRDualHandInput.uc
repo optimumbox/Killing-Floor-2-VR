@@ -162,6 +162,32 @@ function bool OpenHand(int Hand)
     return Accepted;
 }
 
+// A latched wheel, as the upper button's hold opens it.
+function OpenSelector(int Hand)
+{
+    if ((Bridge.NativeValidMask & (1 << Hand)) == 0 || Inventory.HasWorldGrab(Hand)
+        || (Reloads != None && Reloads.OwnsHand(Hand))) return;
+    InputState[Hand].bUpperTapPending = false;
+    Inventory.CancelTransfer();
+    StopWeapon(Hand);
+    Bridge.Hands[Hand].bTriggerArmed = false;
+    InputState[Hand].bSelectorOpen = true;
+    InputState[Hand].bSelectorTriggerArmed = false;
+    InputState[Hand].bSelectorConfirmPending = false;
+    InputState[Hand].bSelectorInitAttempted = false;
+    EnsureSelectors();
+    if (Selectors[Hand] != None) Selectors[Hand].OpenSelection();
+    ModeFeedback(Hand, true);
+}
+
+function CloseSelector(int Hand)
+{
+    InputState[Hand].bSelectorOpen = false;
+    InputState[Hand].bSelectorTriggerArmed = false;
+    InputState[Hand].bSelectorConfirmPending = false;
+    Bridge.Hands[Hand].bTriggerArmed = false;
+}
+
 function bool IsSelectorOpen(int Hand)
 {
     return Hand >= 0 && Hand < 2 && InputState[Hand].bSelectorOpen;
@@ -568,13 +594,22 @@ function UpdateLocomotion(float RealDelta)
             }
         }
     }
-    // The non-movement click offers the welder. The movement click belongs to
-    // sprint/cancel in either handedness; it cannot also equip a tool.
+    // The non-movement click offers the welder at a door. Anywhere else it
+    // toggles the movement hand's wheel, whose own face button is under the
+    // thumb that walks. The movement click belongs to sprint/cancel in either
+    // handedness; it cannot also equip a tool.
     Hand = 1 - MoveHand;
     Bit = 1 << Hand;
     if ((Bridge.NativeValidMask & Bridge.NativeStickClickActiveMask & Bridge.NativeStickClickMask & Bit) != 0
-        && !InputState[Hand].bStickWasDown && InputState[Hand].bStickArmed
-        && !IsSelectorOpen(0) && !IsSelectorOpen(1)) Welding.StickClick();
+        && !InputState[Hand].bStickWasDown && InputState[Hand].bStickArmed)
+    {
+        if (IsSelectorOpen(MoveHand)) CloseSelector(MoveHand);
+        else if (!IsSelectorOpen(0) && !IsSelectorOpen(1))
+        {
+            if (Welding.WantsStickClick()) Welding.StickClick();
+            else OpenSelector(MoveHand);
+        }
+    }
     if (bTeleportMode)
     {
         // VRTeleportLocomotion reads the movement stick directly. Do not let a

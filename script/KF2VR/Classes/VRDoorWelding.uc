@@ -118,6 +118,12 @@ function Update(float Delta)
     }
 }
 
+// Whether the right stick click is the welder's: offered at a door, or put back.
+function bool WantsStickClick()
+{
+    return Holding() || (Target != None && bOffer);
+}
+
 // The right stick click. Away from a door it does nothing.
 function StickClick()
 {

@@ -1849,6 +1849,9 @@ function bool StillValid()
     if (Gun == None || Gun.bDeleteMe || !Enabled()) return false;
     if (!bDetachedMagazineSession
         && (bBreakInspection ? !Gun.IsInState('Active') : !MagazineReloading(Gun))) return false;
+    // A break action is worked by the free hand. Once that hand holds a gun
+    // too, nothing can close it: release it (stock finishes any reload).
+    if (BreakAction.Gun == Gun && InputOwner.Inventory.Registry.GetPrimary(1 - GunHand) != None) return false;
     R = InputOwner.Inventory.Registry.GetPrimary(GunHand);
     return R == Runtime && R != None && R.IsCurrent() && R.Item == Gun;
 }
