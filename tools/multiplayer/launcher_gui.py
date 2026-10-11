@@ -186,6 +186,16 @@ def contextual_arguments(arguments, saved, context):
 
 
 class Launcher(tk.Tk):
+    def bring_to_front(self):
+        try:
+            self.deiconify()
+            self.lift()
+            self.attributes("-topmost", True)
+            self.after(400, lambda: self.attributes("-topmost", False))
+            self.focus_force()
+        except tk.TclError:
+            pass
+
     def __init__(self, art=True, context=None):
         super().__init__()
         release = ROOT / "release.json"
@@ -1123,7 +1133,11 @@ def main(argv=None):
         window.update_idletasks()
         window.destroy()
         return 0
-    Launcher(context=context).mainloop()
+    launcher = Launcher(context=context)
+    # Started from another window (the Steam Play in VR choice): come to the
+    # front instead of opening behind it.
+    launcher.after(150, launcher.bring_to_front)
+    launcher.mainloop()
     return 0
 
 
