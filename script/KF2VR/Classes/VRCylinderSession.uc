@@ -1,9 +1,12 @@
-// One revolver of a two-gun reload (VRDualCylinderReload): the cylinder opens
+// A one-handed gun reloaded at the hip while the other hand is busy (one per
+// hand, VRInteractiveReload.DualCylinders). A revolver: the cylinder opens
 // along the motion its own reload clip shows, a speedloader (the 1858: a
 // loaded cylinder) waits at that side's hip, and bringing the open cylinder to
 // it loads the gun, which then closes. The stock reload state is entered for
 // its server sync and paused at once: none of its animation plays. Stock owns
 // the ammunition; seating only completes its reload.
+// A magazine gun: its magazine leaves, a fresh one waits at that hip, and
+// bringing the gun to it seats it and completes the reload at once.
 // Reuses the manual pump's instance-only part controls and their cleanup.
 class VRCylinderSession extends VRManualPump;
 
@@ -14,6 +17,10 @@ var float Amount, LastTime;
 var StaticMeshComponent Loader;
 var name LoaderMeshFor;
 var KFWeapon FailedGun;
+// Magazine mode: a one-handed magazine gun, its loaded bone and rest frame.
+var bool bMagazine;
+var name LoadedBone;
+var quat MagazineRestQ;
 // The seated loader in the cylinder's frame, from the clip's seating moment.
 var vector SeatRel;
 var quat SeatRel_Q;
@@ -29,14 +36,47 @@ static function bool Covers(KFWeapon W)
         && class'VRBreakCatalog'.static.IsPath(W.Class);
 }
 
+// The magazine profile of a gun, a paired member taking its single gun's.
+static function int MagazineIndex(class<KFWeapon> W)
+{
+    local int I, Best;
+    Best = class'VRReloadCatalog'.static.FindClass(W);
+    if (Best >= 0 || W == None || !(Left(string(W.Name), 13) ~= "VRWeap_Paired")) return Best;
+    for (I = 0; I < class'VRReloadCatalog'.default.Profiles.Length; ++I)
+        if (class'VRReloadCatalog'.default.Profiles[I].WeaponClass != None
+            && ClassIsChildOf(W, class'VRReloadCatalog'.default.Profiles[I].WeaponClass)
+            && (Best < 0 || ClassIsChildOf(class'VRReloadCatalog'.default.Profiles[I].WeaponClass,
+                class'VRReloadCatalog'.default.Profiles[Best].WeaponClass)))
+            Best = I;
+    return Best;
+}
+
+// A one-handed magazine gun (pistols, one-handed SMGs) loads at the hip too.
+static function bool CoversMagazine(VRWeaponRuntime R)
+{
+    local VRWeaponPresenter P;
+    if (R == None || R.Item == None || R.Presenter == None || !R.Item.bReloadFromMagazine
+        || Covers(R.Item) || class'VRBreakCatalog'.static.FindClass(R.Item.Class) >= 0
+        || class'VRPumpCatalog'.static.Covers(R.Item) || MagazineIndex(R.Item.Class) < 0) return false;
+    P = R.Presenter;
+    return P.ActiveProfile >= 0 && P.ActiveProfile < P.WeaponProfiles.Length
+        && P.WeaponProfiles[P.ActiveProfile].bOneHanded && P.WeaponProfiles[P.ActiveProfile].bFirearm;
+}
+
+static function bool CoversRuntime(VRWeaponRuntime R)
+{
+    return R != None && (Covers(R.Item) || CoversMagazine(R));
+}
+
 function bool Active() { return Gun != None; }
 
 function bool Begin(VRWeaponRuntime R, int Hand)
 {
     local name Clip;
     local int I;
-    if (Gun != None || R == None || !Covers(R.Item) || R.Item.MySkelMesh == None) return false;
-    Profile = class'VRBreakCatalog'.static.FindClass(R.Item.Class);
+    if (Gun != None || R == None || !CoversRuntime(R) || R.Item.MySkelMesh == None) return false;
+    bMagazine = !Covers(R.Item);
+    Profile = bMagazine ? MagazineIndex(R.Item.Class) : class'VRBreakCatalog'.static.FindClass(R.Item.Class);
     if (Profile < 0) return false;
     // A reload stock already started (the empty gun's automatic reload) is
     // taken over as it is; otherwise this press starts one.
@@ -55,6 +95,7 @@ function bool Begin(VRWeaponRuntime R, int Hand)
         RootBone = R.Presenter.WeaponProfiles[R.Presenter.ActiveProfile].RootBone;
     bTimersPaused = false;
     PauseStock();
+    if (bMagazine) return BeginMagazine();
     Capacity = class'VRBreakCatalog'.default.Profiles[Profile].Capacity;
     bSpeedloader = class'VRBreakCatalog'.default.Profiles[Profile].ClipBone == 'RW_Speedloader';
     CylinderBone = 'RW_Cylinder';
@@ -94,6 +135,37 @@ function bool Begin(VRWeaponRuntime R, int Hand)
     PlayCue(class'VRBreakCatalog'.default.Profiles[Profile].Open);
     `log("KF2VR_DUAL_CYLINDER phase=begin weapon=" $ Gun.Class @ "hand=" $ Hand @ "clip=" $ Clip
         @ "ammo=" $ Gun.AmmoCount[0] @ "spare=" $ Gun.GetSpareAmmoForHUD() @ "speedloader=" $ bSpeedloader);
+    return true;
+}
+
+// The loaded magazine leaves the gun; the fresh one waits at the hip in the
+// magazine's own frame, as it sits in the gun.
+function bool BeginMagazine()
+{
+    local StaticMesh Mesh;
+    local int I;
+    LoadedBone = '';
+    if (class'VRReloadCatalog'.default.Profiles[Profile].LoadedBone != '')
+        LoadedBone = class'VRReloadCatalog'.static.MagazineBone(Profile, false);
+    else for (I = 0; I < Owner.LoadedBoneNames.Length && LoadedBone == ''; ++I)
+        if (Gun.MySkelMesh.MatchRefBone(Owner.LoadedBoneNames[I]) >= 0) LoadedBone = Owner.LoadedBoneNames[I];
+    if (LoadedBone == '' || Gun.MySkelMesh.MatchRefBone(LoadedBone) < 0 || Gun.MySkelMesh.MatchRefBone(RootBone) < 0)
+    { Abort("magazine-bone"); return false; }
+    Mesh = StaticMesh(DynamicLoadObject("KF2VRHands.VRAmmo_" $ Gun.MySkelMesh.SkeletalMesh.Name, class'StaticMesh', true));
+    if (Mesh == None) { Abort("magazine-asset"); return false; }
+    if (Loader == None) Loader = Owner.MakeComponent(Mesh, None);
+    Loader.SetStaticMesh(Mesh);
+    Loader.SetMaterial(0, Gun.MySkelMesh.GetMaterial(class'VRReloadCatalog'.default.Profiles[Profile].MaterialIndex));
+    Loader.SetMaterial(1, Gun.MySkelMesh.GetMaterial(class'VRReloadCatalog'.default.Profiles[Profile].Section1MaterialIndex));
+    if (class'VRReloadCatalog'.default.Profiles[Profile].Section2MaterialIndex > 0)
+        Loader.SetMaterial(2, Gun.MySkelMesh.GetMaterial(class'VRReloadCatalog'.default.Profiles[Profile].Section2MaterialIndex));
+    Loader.SetScale(GunScale());
+    MagazineRestQ = QuatProduct(QuatInvert(RootQ()), Gun.MySkelMesh.GetBoneQuaternion(LoadedBone));
+    Gun.MySkelMesh.HideBoneByName(LoadedBone, PBO_None);
+    Amount = 0; bOpened = true; bSeated = false; bClosed = false; LastTime = 0;
+    Owner.Pulse(1 << GunHand, 0.3, 0.02);
+    `log("KF2VR_DUAL_CYLINDER phase=begin weapon=" $ Gun.Class @ "hand=" $ GunHand @ "magazine=" $ LoadedBone
+        @ "ammo=" $ Gun.AmmoCount[0] @ "spare=" $ Gun.GetSpareAmmoForHUD());
     return true;
 }
 
@@ -201,9 +273,13 @@ function vector RestCylinderLocal(out quat Q)
 function HipLoader(out vector At, out quat Q)
 {
     local quat CylLocalQ, Down;
-    RestCylinderLocal(CylLocalQ);
     Down = DownQ();
-    Q = QuatProduct(Down, QuatProduct(CylLocalQ, SeatRel_Q));
+    if (bMagazine) Q = QuatProduct(Down, MagazineRestQ);
+    else
+    {
+        RestCylinderLocal(CylLocalQ);
+        Q = QuatProduct(Down, QuatProduct(CylLocalQ, SeatRel_Q));
+    }
     At = Owner.Bridge.AmmoPouchPosition(GunHand, LoaderOffset);
 }
 
@@ -221,6 +297,12 @@ function ShowRounds(bool bShow)
     local KFWeap_PistolBase Revolver;
     local name Bone;
     local int I;
+    if (bMagazine)
+    {
+        if (bShow) Gun.MySkelMesh.UnHideBoneByName(LoadedBone);
+        else Gun.MySkelMesh.HideBoneByName(LoadedBone, PBO_None);
+        return;
+    }
     if (!bSpeedloader)
     {
         // The 1858 swaps its whole cylinder.
@@ -319,7 +401,7 @@ function Tick()
         // Generous: the cylinder near that hip, or anywhere lower on its side,
         // loads it. Dropping the guns to the hips is enough.
         HipLoader(At, Q);
-        Target = Gun.MySkelMesh.GetBoneLocation(CylinderBone);
+        Target = Gun.MySkelMesh.GetBoneLocation(bMagazine ? LoadedBone : CylinderBone);
         if ((VSize((Target - At) * vect(1,1,0)) <= SeatRadius && Target.Z - At.Z <= SeatAbove)
             || Touching(Target))
         {
@@ -327,6 +409,7 @@ function Tick()
             Loader.SetHidden(true);
             ShowRounds(true);
             Owner.Pulse(1 << GunHand, 0.7, 0.04);
+            if (bMagazine) { Complete(); return; }
             PlayCue(class'VRBreakCatalog'.default.Profiles[Profile].InsertB);
         }
         return;
@@ -348,7 +431,7 @@ function Complete()
     Gun.ReloadComplete();
     if (Gun.IdleAnims.Length > 0) Gun.PlayAnimation(Gun.IdleAnims[0], 0.0, true, 0.0);
     Gun.ToggleAdditiveBobAnim(!Gun.bUsingSights);
-    PlayCue(class'VRBreakCatalog'.default.Profiles[Profile].Close);
+    if (!bMagazine) PlayCue(class'VRBreakCatalog'.default.Profiles[Profile].Close);
     Owner.Pulse(1 << GunHand, 0.8, 0.04);
     `log("KF2VR_DUAL_CYLINDER phase=closed weapon=" $ W.Class @ "hand=" $ GunHand @ "ammo=" $ W.AmmoCount[0]);
     Unbind();
@@ -369,6 +452,7 @@ function Abort(string Reason)
 function Unbind()
 {
     if (Loader != None) Loader.SetHidden(true);
+    bMagazine = false; LoadedBone = '';
     bTimersPaused = false;
     ActionPath = None;
     super.Unbind();
@@ -386,7 +470,20 @@ function PlaceVisuals()
     local int I;
     local vector P, PivotP, At;
     local quat Q, PivotQ, Turn;
-    if (Gun == None || Gun.bDeleteMe || Tree == None || Gun.MySkelMesh == None) return;
+    if (Gun == None || Gun.bDeleteMe || Gun.MySkelMesh == None) return;
+    if (bMagazine)
+    {
+        if ((Bridge.NativeValidMask & (1 << GunHand)) != 0 && !bSeated)
+        {
+            HipLoader(At, Q);
+            Loader.SetTranslation(At);
+            Loader.SetRotation(QuatToRotator(Q));
+            Loader.SetHidden(false);
+        }
+        else Loader.SetHidden(true);
+        return;
+    }
+    if (Tree == None) return;
     if ((Bridge.NativeValidMask & (1 << GunHand)) == 0)
     {
         for (I = 0; I < Parts.Length; ++I) Parts[I].Control.SetSkelControlStrength(0, 0);

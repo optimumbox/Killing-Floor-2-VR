@@ -500,47 +500,46 @@ function bool TryBreakAction(VRWeaponRuntime R, int Hand, optional bool bManual)
     return true;
 }
 
-// A revolver in each hand: the reload button opens both cylinders and each
-// loads from a speedloader at its own hip, with no stock animation
-// (VRCylinderSession). The press is consumed while either gun is loading.
+// A one-handed gun whose other hand is busy (a second gun or anything else)
+// has no free hand for the one-hand reload. The reload button opens a
+// revolver's cylinder or drops a pistol's magazine (two such guns: both) and
+// each loads from its own hip, with no stock animation (VRCylinderSession).
+// The press is consumed while a gun it covers is loading.
+function bool HipCylinderHand(int H, out VRWeaponRuntime R)
+{
+    R = InputOwner.Inventory.Registry.GetPrimary(H);
+    return R != None && R.IsCurrent() && class'VRCylinderSession'.static.CoversRuntime(R)
+        && InputOwner.Inventory.Registry.GetPrimary(1 - H) != None
+        && InputOwner.Inventory.Registry.GetPrimary(1 - H) != R;
+}
+
 function bool TryDualCylinder(VRWeaponRuntime R, int Hand)
 {
-    local VRWeaponRuntime Held[2];
+    local VRWeaponRuntime Held;
     local int H;
     local bool bStarted;
-    if (!Enabled() || bActive || R == None) return false;
-    for (H = 0; H < 2; ++H)
-    {
-        Held[H] = InputOwner.Inventory.Registry.GetPrimary(H);
-        if (Held[H] == None || !Held[H].IsCurrent() || !class'VRCylinderSession'.static.Covers(Held[H].Item)) return false;
-    }
-    if (Held[0] == Held[1] || Held[Hand] != R) return false;
+    if (!Enabled() || bActive || R == None || !HipCylinderHand(Hand, Held) || Held != R) return false;
     if (DualCylinders[0].Active() || DualCylinders[1].Active()) return true;
     for (H = 0; H < 2; ++H)
-        if (Held[H].Item.IsInState('Active') && Held[H].Item.AmmoCount[0] < Held[H].Item.MagazineCapacity[0]
-            && DualCylinders[H].Begin(Held[H], H)) bStarted = true;
+        if (HipCylinderHand(H, Held) && Held.Item.IsInState('Active')
+            && Held.Item.AmmoCount[0] < Held.Item.MagazineCapacity[0]
+            && DualCylinders[H].Begin(Held, H)) bStarted = true;
     return bStarted;
 }
 
-// Stock can start a reload by itself (firing an empty gun). With a revolver
-// in each hand, that reload becomes the physical one too, never the clip.
+// Stock can start a reload by itself (firing an empty gun). For such a
+// revolver that reload becomes the hip one too, never the clip.
 function AdoptDualReloads()
 {
-    local VRWeaponRuntime Held[2];
+    local VRWeaponRuntime Held;
     local int H;
     if (!Enabled() || bActive || DualCylinders[0] == None || !InputOwner.ContextValid()) return;
     for (H = 0; H < 2; ++H)
     {
-        Held[H] = InputOwner.Inventory.Registry.GetPrimary(H);
-        if (Held[H] == None || !Held[H].IsCurrent() || !class'VRCylinderSession'.static.Covers(Held[H].Item)) return;
-    }
-    if (Held[0] == Held[1]) return;
-    for (H = 0; H < 2; ++H)
-    {
         if (DualCylinders[H].FailedGun != None && !DualCylinders[H].FailedGun.IsInState('Reloading'))
             DualCylinders[H].FailedGun = None;
-        if (!DualCylinders[H].Active() && MagazineReloading(Held[H].Item))
-            DualCylinders[H].Begin(Held[H], H);
+        if (HipCylinderHand(H, Held) && !DualCylinders[H].Active() && MagazineReloading(Held.Item))
+            DualCylinders[H].Begin(Held, H);
     }
 }
 
@@ -605,6 +604,7 @@ static function bool MagazineReloading(KFWeapon W)
 function bool HoldsPose(KFWeapon W)
 {
     local VRWeaponRuntime R;
+    if (Enabled() && DualCylinderOwns(W)) return true;
     if (W == None || !Enabled() || !Supported(W)) return false;
     if (W.IsInState('AltReloading')
         && (W.Class == class'KFWeap_Shotgun_S12' || W.Class == class'KFWeap_AssaultRifle_FAMAS'))
@@ -613,7 +613,6 @@ function bool HoldsPose(KFWeapon W)
         R = InputOwner.Inventory.Registry.FindItem(W);
         return R != None && R.IsCurrent() && R.PrimaryHand >= 0;
     }
-    if (DualCylinderOwns(W)) return true;
     if (W == RejectedGun) return false;
     if (bActive && W == Gun && bDetachedMagazineSession) return true;
     if (!MagazineReloading(W)) return false;
