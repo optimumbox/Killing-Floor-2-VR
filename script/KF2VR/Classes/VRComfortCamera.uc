@@ -1,7 +1,9 @@
 // Session-owned camera anchor: stock cinematics must never move the VR viewer.
 //
-// Living: boss intros retain the player's first-person view and freely tracked
-// head. The player's Dead state and victory camera hold the last living eye,
+// Living: a boss intro cuts (under a blink) to a fixed vantage in front of the
+// boss, turned to face it, with the head free; the stock cinematic depth of
+// field, which blurred the whole headset view, stays off. The cut back restores
+// the player's own heading. The player's Dead state and victory camera hold the last living eye,
 // with headset look still applied through the controller rotation.
 //
 // Spectating (after the stock 5 s dead timer until respawn): stock KF2 uses a
@@ -36,6 +38,13 @@ var float SpectateAnchorTime, SpectateLosLostSince, BlinkStartTime;
 var bool bLosLost, bNextHeld, bPrevHeld;
 
 var float SpectateBehind, SpectateAbove, SpectateRelocateDistance, SpectateLosGrace, SpectateMinInterval;
+
+// Boss intro vantage.
+var Pawn BossTarget;
+var vector BossVantage;
+var float BossStart;
+var int BossYawShift;
+var float BossDistance, BossMaxSeconds, BossMinSeconds;
 var float BlinkOutSeconds, BlinkHoldSeconds, BlinkInSeconds;
 
 function Reset()
@@ -99,6 +108,70 @@ function vector ChooseAnchor(KFPlayerController PC, Pawn P)
         if (Distance >= SpectateBehind * 0.75) return Candidate;
     }
     return Best;
+}
+
+// A spot in front of the boss at head height, pulled in to the first wall.
+function vector ChooseBossVantage(KFPlayerController PC, Pawn Boss)
+{
+    local vector Head, Facing, Candidate, HitLocation, HitNormal;
+    Head = Boss.Location + vect(0,0,1) * FMax(Boss.BaseEyeHeight, 40);
+    Facing = vector(Boss.Rotation);
+    Facing.Z = 0;
+    if (VSizeSq(Facing) < 0.01) Facing = vect(1,0,0);
+    Candidate = Head + Normal(Facing) * BossDistance;
+    if (PC.Trace(HitLocation, HitNormal, Candidate, Head, false, vect(16,16,16)) != None)
+        Candidate = HitLocation + HitNormal * 8;
+    return Candidate;
+}
+
+// The headset view takes no roll from a game camera: the death camera's
+// Dutch tilt otherwise turns the whole world crooked.
+function rotator LevelRotation(KFPlayerController PC)
+{
+    local rotator R;
+    R = PC.Rotation;
+    if (R.Roll != 0) { R.Roll = 0; PC.SetRotation(R); }
+    return R;
+}
+
+function EndBossView(KFPlayerController PC)
+{
+    local rotator R;
+    if (BossTarget == None) return;
+    BossTarget = None;
+    R = LevelRotation(PC);
+    R.Yaw -= BossYawShift;
+    PC.SetRotation(R);
+    BossYawShift = 0;
+    BlinkStartTime = PC.WorldInfo.RealTimeSeconds;
+}
+
+// True while the boss intro owns the view.
+function bool UpdateBossView(KFPlayerController PC, Pawn Boss)
+{
+    local float Now;
+    local rotator R;
+    Now = PC.WorldInfo.RealTimeSeconds;
+    if (Boss != None && BossTarget == None)
+    {
+        BossTarget = Boss;
+        BossStart = Now;
+        BossVantage = ChooseBossVantage(PC, Boss);
+        R = LevelRotation(PC);
+        BossYawShift = NormalizeRotAxis(rotator(Boss.Location - BossVantage).Yaw - R.Yaw);
+        R.Yaw += BossYawShift;
+        PC.SetRotation(R);
+        BlinkStartTime = Now;
+    }
+    if (BossTarget == None) return false;
+    if (BossTarget.bDeleteMe || BossTarget.Health <= 0 || Now - BossStart > BossMaxSeconds
+        || (!PC.bCinematicMode && Now - BossStart > BossMinSeconds))
+    { EndBossView(PC); return false; }
+    PC.bGamePlayDOFActive = false;
+    PC.PlayerCamera.CameraCache.POV.Location = BossVantage;
+    PC.PlayerCamera.CameraCache.POV.Rotation = LevelRotation(PC);
+    PC.PlayerCamera.CameraCache.POV.FOV = bHaveEye ? StableFOV : PC.DefaultFOV;
+    return true;
 }
 
 function Relocate(KFPlayerController PC, Pawn P)
@@ -171,7 +244,7 @@ function UpdateSpectating(KFPlayerController PC)
     }
     PollSpectateInput(PC);
     PC.PlayerCamera.CameraCache.POV.Location = SpectateAnchor;
-    PC.PlayerCamera.CameraCache.POV.Rotation = PC.Rotation;
+    PC.PlayerCamera.CameraCache.POV.Rotation = LevelRotation(PC);
     PC.PlayerCamera.CameraCache.POV.FOV = bHaveEye ? StableFOV : PC.DefaultFOV;
 }
 
@@ -266,12 +339,14 @@ function Update(KFPlayerController PC, optional VRHandsBridge Hands, optional bo
 {
     local KFPawn_Human Human;
     local bool bHold, bBossFirstPerson;
+    local Pawn Boss;
 
     if (PC == None || !PC.IsLocalController() || PC.PlayerCamera == None) { EndVictory(); return; }
     UpdateVictory(PC, Hands, bMenuOpen);
     Human = KFPawn_Human(PC.Pawn);
     if (PC.IsInState('Spectating') && Human == None)
     {
+        EndBossView(PC);
         UpdateSpectating(PC);
         return;
     }
@@ -286,10 +361,16 @@ function Update(KFPlayerController PC, optional VRHandsBridge Hands, optional bo
         && !PC.IsInState('Dead') && !PC.IsInState('Spectating');
     if (bBossFirstPerson)
     {
+        // The stock intro targets the boss pawn; keep it for the vantage.
+        Boss = Pawn(PC.PlayerCamera.ViewTarget.Target);
+        if (Boss == Human || KFPawn_Monster(Boss) == None) Boss = None;
         PC.SetViewTarget(Human);
         Human.SetMeshVisibility(false);
         PC.PlayerCamera.CameraStyle = 'FirstPerson';
     }
+    if (Human != None && Human.Health > 0 && !PC.IsInState('Dead')
+        && UpdateBossView(PC, Boss)) return;
+    if (Human == None || Human.Health <= 0) EndBossView(PC);
     // Hold the old eye for the transition frame: its stock cache still contains
     // the boss camera. The next stock update computes the first-person eye.
     // Boss requests without a living player, the corpse and victory chase camera
@@ -311,7 +392,7 @@ function Update(KFPlayerController PC, optional VRHandsBridge Hands, optional bo
             bHaveEye = true;
         }
         PC.PlayerCamera.CameraCache.POV.Location = StableEye;
-        PC.PlayerCamera.CameraCache.POV.Rotation = PC.Rotation;
+        PC.PlayerCamera.CameraCache.POV.Rotation = LevelRotation(PC);
         PC.PlayerCamera.CameraCache.POV.FOV = StableFOV;
         return;
     }
@@ -335,4 +416,7 @@ defaultproperties
     BlinkOutSeconds=0.08
     BlinkHoldSeconds=0.04
     BlinkInSeconds=0.12
+    BossDistance=420.0
+    BossMaxSeconds=20.0
+    BossMinSeconds=3.0
 }

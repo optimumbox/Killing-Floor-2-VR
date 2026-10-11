@@ -46,6 +46,7 @@ var VRDoorWelding Welding;
 var VRInteractiveReload Reloads;
 var int NativeFocusRequested;
 var float SprintResumeTime;
+var float NextFireDiagTime[2];
 // Raw turn-stick deflection that counts as the outer rim for a jump.
 const JumpRimMagnitude = 0.95;
 
@@ -186,6 +187,29 @@ function CloseSelector(int Hand)
     InputState[Hand].bSelectorTriggerArmed = false;
     InputState[Hand].bSelectorConfirmPending = false;
     Bridge.Hands[Hand].bTriggerArmed = false;
+}
+
+// Diagnostic: a trigger press on a held gun that something will hold back,
+// with every gate that can (a gun that intermittently would not fire until it
+// was swapped out and back).
+function LogBlockedTrigger(int Hand, VRWeaponRuntime R, KFWeapon W, bool bEdge)
+{
+    local bool bReady, bArmed, bReload, bState;
+    if (!bEdge || W == None || W.IsA('KFWeap_MeleeBase') || Bridge.WorldInfo.RealTimeSeconds < NextFireDiagTime[Hand]) return;
+    bReady = R != None && R.Presenter != None && R.Presenter.bCalibrated && R.Presenter.NativeWeaponReady != 0;
+    bArmed = Bridge.Hands[Hand].bTriggerArmed;
+    bReload = Reloads != None && Reloads.BlocksFire(W);
+    bState = W.IsInState('Active') || W.IsInState('WeaponFiring') || W.IsInState('WeaponSingleFiring')
+        || W.IsInState('WeaponBurstFiring') || W.IsInState('Reloading');
+    if (bReady && bArmed && !bReload && bState && W.AmmoCount[0] > 0) return;
+    NextFireDiagTime[Hand] = Bridge.WorldInfo.RealTimeSeconds + 0.5;
+    `log("KF2VR_FIRE_BLOCKED hand=" $ Hand @ "weapon=" $ W.Class @ "state=" $ W.GetStateName()
+        @ "ammo=" $ W.AmmoCount[0] @ "primary=" $ (R != None) @ "calibrated=" $ (R != None && R.Presenter != None && R.Presenter.bCalibrated)
+        @ "ready=" $ ((R != None && R.Presenter != None) ? R.Presenter.NativeWeaponReady : -1) @ "armed=" $ bArmed
+        @ "reload_blocks=" $ bReload @ "hip=" $ (Reloads != None && Reloads.DualCylinderOwns(W))
+        @ "break=" $ (Reloads != None && Reloads.BreakAction != None && Reloads.BreakAction.Gun == W)
+        @ "pump=" $ (Reloads != None && Reloads.Pump != None && Reloads.Pump.Gun == W)
+        @ "reload_active=" $ (Reloads != None && Reloads.bActive && Reloads.Gun == W));
 }
 
 function bool IsSelectorOpen(int Hand)
@@ -991,6 +1015,7 @@ function UpdateHand(int Hand, float DeltaTime)
     if (R == None) R = Inventory.Registry.GetSupport(Hand);
     R = Inventory.Registry.GetPrimary(Hand);
     W = LastWeapon[Hand];
+    LogBlockedTrigger(Hand, R, W, TriggerEdge);
     if (R == None || W == None || R.Presenter == None
         || !R.Presenter.bCalibrated || R.Presenter.NativeWeaponReady == 0)
     {
