@@ -18,6 +18,7 @@ from evidence import query_server
 from native_fixture import NativeDeployment
 from vr_config import import_preferences, export_preferences
 import desktop_settings
+import vr_graphics
 import local_test_control
 import promo_session
 import motion_session
@@ -37,6 +38,20 @@ ROOT = Path(__file__).resolve().parents[2]
 # Server and Workshop cache sit beside the extracted release so later releases
 # reuse them. A ZIP keeps the release in app/ under its own top-level folder.
 SHARED = ROOT.parent.parent if ROOT.name.lower() == "app" else ROOT.parent
+
+PROGRESSION_WARNING = (
+    "PROGRESSION WARNING: Displayed XP and levels may not persist in unranked or cheat sessions. "
+    "Saving progress depends on the game's ranked/cheat and online-stat checks; VAC alone does not establish eligibility."
+)
+
+
+def launch_notices(store):
+    if store == "epic":
+        security = "VAC is Steam server protection. Epic supports experimental Solo VR only; no VAC-on mode is available here."
+    else:
+        security = ("VAC OFF: This launcher requires VAC-off hosts. "
+                    "Secure injected VR is unsupported; the adapter's VAC safety has not been established.")
+    return security, PROGRESSION_WARNING
 
 
 def save_session_record(output, record):
@@ -522,6 +537,9 @@ def configure_role(run, name, user, game, args):
     configure_mod_settings(role, args, game, user)
     if name == "driver" and not args.vr:
         desktop_settings.apply(configs, user, getattr(args, "profile_root", None))
+    elif name == "driver" and args.vr:
+        vr_graphics.apply(configs, getattr(args, "profile_root", None),
+                          reset=getattr(args, "vr_quality_requested", None) is not None)
     role["config_hashes"] = config_hashes(configs)
     return role
 
@@ -747,6 +765,8 @@ def main():
     install = game_install.select_for_launch(store=args.store, root=args.game_root, saved_root=saved.get("game_root"))
     game_install.validate_native(install, manifest.get("supported_game_sha256", [manifest["game_sha256"]]))
     game, exe = install.root, install.executable
+    for notice in launch_notices(install.store):
+        print(notice, flush=True)
     if install.store == "epic":
         from epic_manual import run_session
         return run_session(args, manifest, install)
@@ -1077,7 +1097,8 @@ def main():
             errors += server_deployment.restore()
         if args.vr and any(role is player_role for role, _ in owned):
             try:
-                export_preferences(Path(player_role["config_root"]), network=not args.solo)
+                export_preferences(Path(player_role["config_root"]), root=getattr(args, "profile_root", None),
+                                   network=not args.solo)
             except (OSError, ValueError) as error:
                 errors.append(f"Could not save VR preferences: {error}")
         elif not args.vr and any(role is player_role for role, _ in owned):

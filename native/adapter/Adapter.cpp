@@ -1019,6 +1019,8 @@ void HookProcessInternal(void* object,void* stack,void* result) {
     adapter::promo::Log::DamageScope promoDamage(promoLog,script,
         callback==Callback::TakeDamage?object:nullptr,function);
     if (callback==Callback::NativeHandsUpdate) promoLog.LocalPlayer(script,demo->controlledController);
+    if (callback==Callback::FireAmmunition &&
+        adapter::MagazineFeedBlocksShot(script,demo->handsBridge,demo->controlledPawn,object,function)) return;
     if (callback==Callback::NativeMagazineFeedEvent &&
         adapter::RouteMagazineFeedEvent(script,demo->handsBridge,demo->controlledPawn,object,function,locals,result)) return;
     if (callback==Callback::RenderDisplay && demo->handsBridge) {
@@ -2051,9 +2053,12 @@ std::int32_t HookControllerTick(void* controller,float delta,std::int32_t tickTy
                 adapter::HeadAimRequest request{};
                 const auto status=demo->headAim.Prepare(world.controller,current,demo->frame,request);
                 // Floor match needs absolute heights, so only a STAGE space;
-                // the bridge publishes 0 for seated play.
+                // the bridge publishes 0 for seated play. Its explicit seated
+                // eye offset also works in LOCAL space and moves head/hands
+                // through the same reference, without recapturing physical height.
                 demo->headAim.SetFloorEye(demo->backend.Info().stageSpace && demo->handsBridge ?
-                    demo->script.Read<float>(demo->handsBridge,L"NativeFloorEyeHeight") : 0.f);
+                    demo->script.Read<float>(demo->handsBridge,L"NativeFloorEyeHeight") : 0.f,
+                    demo->handsBridge ? demo->script.Read<float>(demo->handsBridge,L"NativeSeatedEyeOffset") : 0.f);
                 if (status==adapter::HeadAimStatus::ReferenceEstablished) {
                     if (demo->handsBridge) demo->script.Write(demo->handsBridge,L"NativeCalibrationEpoch",
                         demo->script.Read<int>(demo->handsBridge,L"NativeCalibrationEpoch")+1);

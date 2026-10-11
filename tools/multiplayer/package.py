@@ -23,7 +23,7 @@ from dependencies import extract_msi, extract_verified, PINS
 
 LAUNCHER_MODULES = (
     "friends.py", "session.py", "saved_motion.py", "motion_timeline.py", "motion_fixture_evidence.py", "abort_fixture.py", "native_fixture.py", "evidence.py", "avatar_evidence.py",
-    "watchdog.py", "vr_config.py", "desktop_settings.py", "workshop_map.py", "workshop_loadout.py",
+    "watchdog.py", "vr_config.py", "vr_graphics.py", "desktop_settings.py", "workshop_map.py", "workshop_loadout.py",
     "release_state.py", "acceptance.py", "launch_menu.py", "launch_state.py", "launcher_gui.py",
     "recovery.py", "diagnostics.py", "dependencies.py", "join_code.py", "local_test_control.py", "breacher.py",
     "promo_session.py", "promo_events.py", "motion_session.py",
