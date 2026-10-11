@@ -505,15 +505,16 @@ function UpdateLocomotion(float RealDelta)
     // throughout an aim, so a destination and an arrival facing stay separate
     // choices made with separate thumbs.
     bTeleportMode = Bridge.LocomotionMode == 1 && Teleport != None;
-    // Start neutral each frame. A selector consumes only the stick that owns
-    // it; the other hand keeps its ordinary move/turn role.
+    // Start neutral each frame. A wheel on the turn hand consumes that stick;
+    // the movement stick always walks, wheel or not. A wheel reads the hand
+    // relative to the pawn and is anchored to it, so it travels along.
     Bridge.NativeMoveX = 0;
     Bridge.NativeMoveY = 0;
     Bridge.NativeTurnX = 0;
     for (Hand = 0; Hand < 2; ++Hand)
     {
         Bit = 1 << Hand;
-        if (IsSelectorOpen(Hand))
+        if (IsSelectorOpen(Hand) && Hand != MoveHand)
         {
             // Releasing a latched selector with its stick still displaced
             // must not turn into a movement or turn edge.
