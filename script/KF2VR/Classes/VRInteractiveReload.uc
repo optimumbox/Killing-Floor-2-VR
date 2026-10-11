@@ -47,6 +47,8 @@ var VRManualPump Pump;
 // Bolt and lever actions worked by hand after every shot.
 var VRManualAction ManualAction;
 var VRBreakAction BreakAction;
+// Two held revolvers reloaded together, one session per hand.
+var VRCylinderSession DualCylinders[2];
 var VRBeltShellPresentation BeltShells;
 var name CylinderInsertFrame;
 var int CylinderInsertHand;
@@ -300,6 +302,10 @@ function Initialize(VRDualHandInput I)
     ManualAction.Initialize(self);
     BreakAction = new(self) class'VRBreakAction';
     BreakAction.Initialize(self);
+    DualCylinders[0] = new(self) class'VRCylinderSession';
+    DualCylinders[0].Initialize(self);
+    DualCylinders[1] = new(self) class'VRCylinderSession';
+    DualCylinders[1].Initialize(self);
     Audio = new(self) class'VRReloadAudio';
     Audio.Initialize(self);
     Dropped = new(self) class'VRDroppedMagazines';
@@ -315,6 +321,7 @@ function bool BlocksFire(KFWeapon W, optional bool bSecondary)
     if ((!bSecondary || (W != None && W.GetAmmoType(1) == 0)) && MagazineFeedBlocks(W)) return true;
     return (Pump != None && Pump.BlocksFire(W)) || (ManualAction != None && ManualAction.BlocksFire(W))
         || (BreakAction != None && BreakAction.BlocksFire(W))
+        || DualCylinderOwns(W)
         || (!bSecondary && SlideLockBlocks(W));
 }
 
@@ -493,6 +500,34 @@ function bool TryBreakAction(VRWeaponRuntime R, int Hand, optional bool bManual)
     return true;
 }
 
+// A revolver in each hand: the reload button opens both cylinders and each
+// loads from a speedloader at its own hip, with no stock animation
+// (VRCylinderSession). The press is consumed while either gun is loading.
+function bool TryDualCylinder(VRWeaponRuntime R, int Hand)
+{
+    local VRWeaponRuntime Held[2];
+    local int H;
+    local bool bStarted;
+    if (!Enabled() || bActive || R == None) return false;
+    for (H = 0; H < 2; ++H)
+    {
+        Held[H] = InputOwner.Inventory.Registry.GetPrimary(H);
+        if (Held[H] == None || !Held[H].IsCurrent() || !class'VRCylinderSession'.static.Covers(Held[H].Item)) return false;
+    }
+    if (Held[0] == Held[1] || Held[Hand] != R) return false;
+    if (DualCylinders[0].Active() || DualCylinders[1].Active()) return true;
+    for (H = 0; H < 2; ++H)
+        if (Held[H].Item.IsInState('Active') && Held[H].Item.AmmoCount[0] < Held[H].Item.MagazineCapacity[0]
+            && DualCylinders[H].Begin(Held[H], H)) bStarted = true;
+    return bStarted;
+}
+
+function bool DualCylinderOwns(KFWeapon W)
+{
+    return W != None && ((DualCylinders[0] != None && DualCylinders[0].Gun == W)
+        || (DualCylinders[1] != None && DualCylinders[1].Gun == W));
+}
+
 // AS2's slide release (slideReleaseButtonEnabled): once the fresh magazine is
 // seated and the stock reload waits with the action locked back, the gun
 // hand's reload button drops the slide or bolt home instead of a rack. It is
@@ -527,7 +562,8 @@ function bool TrySlideRelease(VRWeaponRuntime R, int Hand)
     return true;
 }
 
-// Exact classes: paired, dual and unaudited variants keep the button reload.
+// Exact classes, plus paired members of a covered break-action gun (one per
+// hand). Dual and unaudited variants keep the button reload.
 static function bool Supported(KFWeapon W)
 {
     return W != None && (class'VRPumpCatalog'.static.Covers(W)
@@ -555,6 +591,7 @@ function bool HoldsPose(KFWeapon W)
         R = InputOwner.Inventory.Registry.FindItem(W);
         return R != None && R.IsCurrent() && R.PrimaryHand >= 0;
     }
+    if (DualCylinderOwns(W)) return true;
     if (W == RejectedGun) return false;
     if (bActive && W == Gun && bDetachedMagazineSession) return true;
     if (!MagazineReloading(W)) return false;
@@ -1655,6 +1692,8 @@ function Update(float Delta)
     if (Pump != None) Pump.Update();
     if (ManualAction != None) ManualAction.Update();
     if (BreakAction != None) BreakAction.Update();
+    if (DualCylinders[0] != None) DualCylinders[0].Tick();
+    if (DualCylinders[1] != None) DualCylinders[1].Tick();
     UpdateSlideLocks();
     CountBlockedTriggers();
     if (!bActive)
@@ -2949,6 +2988,8 @@ function Shutdown()
     if (Pump != None) { Pump.Shutdown(); Pump = None; }
     if (ManualAction != None) { ManualAction.Shutdown(); ManualAction = None; }
     if (BreakAction != None) { BreakAction.Shutdown(); BreakAction = None; }
+    for (I = 0; I < 2; ++I)
+        if (DualCylinders[I] != None) { DualCylinders[I].Shutdown(); DualCylinders[I] = None; }
     if (Dropped != None) { Dropped.Shutdown(); Dropped = None; }
     if (Bridge != None)
     {
@@ -3835,6 +3876,8 @@ function PlaceVisuals()
     if (Pump != None) Pump.PlaceVisuals();
     if (ManualAction != None) ManualAction.PlaceVisuals();
     if (BreakAction != None) BreakAction.PlaceVisuals();
+    if (DualCylinders[0] != None) DualCylinders[0].PlaceVisuals();
+    if (DualCylinders[1] != None) DualCylinders[1].PlaceVisuals();
     PlaceMagazineFeeds();
     if (Bridge == None || InputOwner == None || !Enabled()
         || !InputOwner.ContextValid() || (Bridge.NativeValidMask & 3) != 3)

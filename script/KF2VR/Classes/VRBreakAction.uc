@@ -188,7 +188,8 @@ function bool BeginSession(VRWeaponRuntime R, int Hand)
     Amount = 0; bOpened = false; bClosed = false; bCloseReady = false;
     bFlickClosing = false;
     bEngaged = false; SeatedShells = 0;
-    RequiredShells = Min(Capacity - Gun.AmmoCount[0], Gun.SpareAmmoCount[0]);
+    // A paired member's reserve is its pair's (its own count stays zero).
+    RequiredShells = Min(Capacity - Gun.AmmoCount[0], Gun.GetSpareAmmoForHUD());
     if (Owner.bBreakInspection) RequiredShells = 0;
     bManualOpening = bRequestOpening; bRequestOpening = false;
     if (!Owner.bInsertSampled || !Owner.EnsureRefMesh()) { Gun = None; return false; }

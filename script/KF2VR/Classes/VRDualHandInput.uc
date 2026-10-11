@@ -1077,8 +1077,8 @@ function UpdateHand(int Hand, float DeltaTime)
     bReloadWasRunning = Bridge.PC.bRun != 0 && !EffectiveTrigger;
     if ((EffectiveTrigger && !InputState[Hand].bTriggerWasDown) || WantParry) CancelSprint();
     if (VRTrackedWeapon(W) != None) UpdateTrackedItem(R, Hand, EffectiveTrigger, Reload);
-    else if (Reload && (Reloads == None
-        || (!Reloads.TryBreakAction(R, Hand) && !Reloads.TrySlideRelease(R, Hand))))
+    else if (Reload && (Reloads == None || (!Reloads.TryDualCylinder(R, Hand)
+        && !Reloads.TryBreakAction(R, Hand) && !Reloads.TrySlideRelease(R, Hand))))
     { R.StartAction(2); InputState[Hand].bReloadPulse = true; }
     if (Reload)
     {

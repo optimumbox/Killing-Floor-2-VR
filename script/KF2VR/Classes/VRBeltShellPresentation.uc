@@ -35,7 +35,7 @@ function bool HasProp(KFWeapon W)
 function bool Hovered(KFWeapon W, int GunHand)
 {
     local int Hand;
-    if (Owner == None || W == None || W.SpareAmmoCount[0] <= 0) return false;
+    if (Owner == None || W == None || W.GetSpareAmmoForHUD() <= 0) return false;
     Hand = 1 - GunHand;
     if (!Owner.bActive) return (Owner.IdleZoneMask & (1 << Hand)) != 0;
     return Owner.Gun == W && Owner.ZoneStep == 1 && Owner.bInZone
@@ -127,7 +127,7 @@ function Place()
         // A stock paired weapon has one pool, so it is represented once.
         if (Hand == 1 && ShownWeapons[0] == W && Flags[0].Prepared
             && Owner.InputOwner.Inventory.Registry.GetPrimary(0) == R) continue;
-        if (!Covers(W) || W.bDeleteMe || W.SpareAmmoCount[0] <= 0
+        if (!Covers(W) || W.bDeleteMe || W.GetSpareAmmoForHUD() <= 0
             || W.MySkelMesh == None || W.MySkelMesh.SkeletalMesh == None) continue;
         if (ShownWeapons[Hand] != W) Prepare(Hand, W);
         if (!Flags[Hand].Prepared) continue;
