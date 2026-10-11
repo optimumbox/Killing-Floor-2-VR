@@ -104,7 +104,7 @@ var vector HandLastWorld[2], HandVelocity[2];
 var float HandLastTime;
 var bool bGuidedInsert;
 var float GuideProgress;
-var float SeatTolerance, MagazineLateralSlack;
+var float SeatTolerance, MagazineLateralSlack, CylinderSnapRadius;
 var KFSkeletalMeshComponent RefMesh;
 // The ammunition in the off hand's controller frame: the stock animation's
 // hand-to-ammunition transform at Entry, mirrored for a right off hand.
@@ -1450,6 +1450,13 @@ function UpdateInsertion(optional bool bReleased)
     Radius = SnapRadius * MagnetScale();
     Scale = GunScale();
     Distance = VSize(HeldLocation() - AmmoTarget());
+    // A speedloader or loaded cylinder is round: bringing it to the open
+    // cylinder at any roll or angle seats it, without the magazine's guided
+    // slide along an exact axis.
+    if (!bReleased && class'VRBreakCatalog'.static.CylinderReload(Gun) && BreakAction.Gun == Gun
+        && BreakAction.ReadyForShell()
+        && FMin(Distance, VSize(HeldLocation() - SeatLocation())) <= CylinderSnapRadius * MagnetScale())
+    { Seat(); return; }
     if (!bInsertSampled || InsertPath.Length < 2 || VSize(SeatLocal - EntryLocal) < 0.1)
     {
         // A missing/degenerate authored track keeps the proximity fallback,
@@ -4028,6 +4035,7 @@ defaultproperties
     EntryLead=0.12
     SeatSlideTime=0.1
     SeatTolerance=1.5
+    CylinderSnapRadius=12
     MagazineLateralSlack=2
     HintDelay=0.75
     DryFireWindow=3.0

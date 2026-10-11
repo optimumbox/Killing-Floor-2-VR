@@ -18,7 +18,7 @@ var vector SeatRel;
 var quat SeatRel_Q;
 var name CylinderBone;
 var vector LoaderOffset;
-var float SeatRadius, OpenTime, CloseTime;
+var float SeatRadius, SeatAbove, OpenTime, CloseTime;
 
 static function bool Covers(KFWeapon W)
 {
@@ -244,7 +244,7 @@ function Tick()
 {
     local float Time, DT;
     local vector At, Target;
-    local quat Q, TargetQ;
+    local quat Q;
     if (Gun == None) return;
     if (!StillValid()) { Abort("ended"); return; }
     Time = Owner.Now(); DT = (LastTime > 0) ? Time - LastTime : 0.0; LastTime = Time;
@@ -263,9 +263,11 @@ function Tick()
     }
     if (!bSeated)
     {
+        // Generous: the cylinder near that hip, or anywhere lower on its side,
+        // loads it. Dropping the guns to the hips is enough.
         HipLoader(At, Q);
-        Target = SeatTarget(TargetQ);
-        if (VSize(Target - At) <= SeatRadius)
+        Target = Gun.MySkelMesh.GetBoneLocation(CylinderBone);
+        if (VSize((Target - At) * vect(1,1,0)) <= SeatRadius && Target.Z - At.Z <= SeatAbove)
         {
             bSeated = true;
             Loader.SetHidden(true);
@@ -372,7 +374,8 @@ defaultproperties
 {
     // Each side's hip, a little forward of the magazine pouch's line.
     LoaderOffset=(X=8,Y=-24,Z=-30)
-    SeatRadius=10
+    SeatRadius=26
+    SeatAbove=14
     OpenTime=0.25
     CloseTime=0.12
 }

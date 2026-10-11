@@ -19,7 +19,7 @@ var vector HingeAxis, HingeU, HingeV;
 var VRActionPath ActionPath;
 var bool bPath, bClip;
 var bool bCylinder, bSpeedloader, bEjected;
-var float EjectStarted, EjectTime;
+var float EjectStarted, EjectTime, TapRadius;
 // Exact MG3 profile only. The seated box and seated belt are separate facts.
 var VRMG3BeltPath BeltPath;
 var bool bBoxSeated, bBeltSeated, bBeltEngaged, bBeltGripWasDown;
@@ -487,6 +487,15 @@ function UpdateHand()
         else FlickTravel = 0;
         if (Rate > 2.5 && Abs(FlickTravel) > 0.22) bFlickClosing = true;
     }
+    // A loaded cylinder closes at a touch: the free hand reaching its lever
+    // or the cylinder itself, no squeeze needed.
+    if (bCylinder && CanClose && !bClosed && !bFlickClosing && !bEngaged && Owner.HandMode == 0
+        && (VSize(Bridge.Hands[OffHand()].Position - Contact()) <= TapRadius
+            || VSize(Bridge.Hands[OffHand()].Position - Gun.MySkelMesh.GetBoneLocation('RW_Cylinder')) <= TapRadius))
+    {
+        bFlickClosing = true;
+        Owner.Pulse(1 << OffHand(), 0.3, 0.02);
+    }
     if (bFlickClosing && DT > 0 && DT < 0.1) Amount = FMax(0, Amount - DT / 0.1);
     if (CanClose && !bClosed && Amount <= 0.05)
     {
@@ -659,4 +668,5 @@ function Unbind()
 defaultproperties
 {
     Radius=12
+    TapRadius=16
 }
