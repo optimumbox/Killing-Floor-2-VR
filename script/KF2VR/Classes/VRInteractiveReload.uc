@@ -477,7 +477,10 @@ function bool Enabled()
 function bool TryBreakAction(VRWeaponRuntime R, int Hand, optional bool bManual)
 {
     if (!Enabled() || R == None || !R.IsCurrent() || !class'VRBreakAction'.static.Supported(R.Item)
-        || InputOwner.Inventory.Registry.GetPrimary(1-Hand) != None) return false;
+        || HandBusy(1 - Hand)) return false;
+    // A second press shuts a gun that was only opened to look inside.
+    if (bActive && Gun == R.Item && bBreakInspection && BreakAction.Gun == Gun && BreakAction.bOpened)
+    { BreakAction.bFlickClosing = true; return true; }
     if (bActive) return Gun == R.Item;
     // A button pulse can end before stock shot recovery does. Preserve that
     // explicit request separately from the launcher's automatic pending fire.
@@ -505,12 +508,18 @@ function bool TryBreakAction(VRWeaponRuntime R, int Hand, optional bool bManual)
 // revolver's cylinder or drops a pistol's magazine (two such guns: both) and
 // each loads from its own hip, with no stock animation (VRCylinderSession).
 // The press is consumed while a gun it covers is loading.
+// A hand that cannot do reload work: holding a gun, a zed, a grenade or dosh.
+function bool HandBusy(int Hand)
+{
+    return InputOwner.Inventory.Registry.GetPrimary(Hand) != None
+        || InputOwner.Inventory.HasWorldGrab(Hand) || InputOwner.HandCarrying(Hand);
+}
+
 function bool HipCylinderHand(int H, out VRWeaponRuntime R)
 {
     R = InputOwner.Inventory.Registry.GetPrimary(H);
     return R != None && R.IsCurrent() && class'VRCylinderSession'.static.CoversRuntime(R)
-        && InputOwner.Inventory.Registry.GetPrimary(1 - H) != None
-        && InputOwner.Inventory.Registry.GetPrimary(1 - H) != R;
+        && InputOwner.Inventory.Registry.GetPrimary(1 - H) != R && HandBusy(1 - H);
 }
 
 function bool TryDualCylinder(VRWeaponRuntime R, int Hand)
@@ -1873,7 +1882,7 @@ function bool StillValid()
         && (bBreakInspection ? !Gun.IsInState('Active') : !MagazineReloading(Gun))) return false;
     // A break action is worked by the free hand. Once that hand holds a gun
     // too, nothing can close it: release it (stock finishes any reload).
-    if (BreakAction.Gun == Gun && InputOwner.Inventory.Registry.GetPrimary(1 - GunHand) != None) return false;
+    if (BreakAction.Gun == Gun && HandBusy(1 - GunHand)) return false;
     R = InputOwner.Inventory.Registry.GetPrimary(GunHand);
     return R == Runtime && R != None && R.IsCurrent() && R.Item == Gun;
 }
@@ -1898,8 +1907,8 @@ function Begin(VRWeaponRuntime R, int Hand, optional bool bEmptyEject, optional 
     local SkeletalMeshComponent M;
     local VRReloadMeshPresentation P;
     local bool bMagazineWasOut;
-    // The other hand must be free to reload: two guns keep the button reload.
-    if (InputOwner.Inventory.Registry.GetPrimary(1 - Hand) != None) return;
+    // The other hand must be free to reload: a busy hand reloads at the hip.
+    if (HandBusy(1 - Hand)) return;
     // A pending lock is released before anything else; its stock reload runs.
     if (R.bSlideLockPending) { RejectedGun = R.Item; return; }
     Audio.ResetSession();

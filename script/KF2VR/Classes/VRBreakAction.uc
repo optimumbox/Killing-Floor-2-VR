@@ -19,7 +19,7 @@ var vector HingeAxis, HingeU, HingeV;
 var VRActionPath ActionPath;
 var bool bPath, bClip;
 var bool bCylinder, bSpeedloader, bEjected;
-var float EjectStarted, EjectTime, TapRadius;
+var float EjectStarted, EjectTime, TapRadius, InspectSeconds;
 // Exact MG3 profile only. The seated box and seated belt are separate facts.
 var VRMG3BeltPath BeltPath;
 var bool bBoxSeated, bBeltSeated, bBeltEngaged, bBeltGripWasDown;
@@ -85,6 +85,17 @@ function Update()
     {
         bQueuedOpening = false; bQueuedReload = false; QueuedGun = None;
         if (!Owner.bActive || !Owner.StillValid()) { Unbind(); return; }
+        // A gun opened only to look inside always shuts again: by itself after
+        // a moment, or at once on its own trigger, whatever the other hand does.
+        if (Owner.bBreakInspection && bOpened && !bClosed
+            && (Owner.TriggerDown(GunHand) || Owner.Now() - EjectStarted > InspectSeconds))
+        {
+            Amount = 0; bClosed = true; bEngaged = false; bFlickClosing = false;
+            PlaceVisuals();
+            Owner.Pulse(1 << GunHand, 0.5, 0.03);
+            Owner.Audio.EmitCue(5, bPath ? Contact() : Hinge());
+            return;
+        }
         UpdateHand();
         return;
     }
@@ -669,4 +680,5 @@ defaultproperties
 {
     Radius=12
     TapRadius=16
+    InspectSeconds=1.5
 }

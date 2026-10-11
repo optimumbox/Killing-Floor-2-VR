@@ -21,6 +21,7 @@ var KFWeapon FailedGun;
 var bool bMagazine;
 var name LoadedBone;
 var quat MagazineRestQ;
+var AkEvent MagInSound, RackSound;
 // The seated loader in the cylinder's frame, from the clip's seating moment.
 var vector SeatRel;
 var quat SeatRel_Q;
@@ -161,12 +162,58 @@ function bool BeginMagazine()
         Loader.SetMaterial(2, Gun.MySkelMesh.GetMaterial(class'VRReloadCatalog'.default.Profiles[Profile].Section2MaterialIndex));
     Loader.SetScale(GunScale());
     MagazineRestQ = QuatProduct(QuatInvert(RootQ()), Gun.MySkelMesh.GetBoneQuaternion(LoadedBone));
+    DropOldMagazine(Mesh);
+    FindReloadSounds();
     Gun.MySkelMesh.HideBoneByName(LoadedBone, PBO_None);
     Amount = 0; bOpened = true; bSeated = false; bClosed = false; LastTime = 0;
     Owner.Pulse(1 << GunHand, 0.3, 0.02);
     `log("KF2VR_DUAL_CYLINDER phase=begin weapon=" $ Gun.Class @ "hand=" $ GunHand @ "magazine=" $ LoadedBone
         @ "ammo=" $ Gun.AmmoCount[0] @ "spare=" $ Gun.GetSpareAmmoForHUD());
     return true;
+}
+
+// The old magazine falls out of the gun where it sat, as a free-hand reload's.
+function DropOldMagazine(StaticMesh Mesh)
+{
+    local vector Centre, Extent, At;
+    local quat Q;
+    if (Owner.Dropped == None) return;
+    Loader.SetScale(1);
+    Loader.SetRotation(rot(0,0,0));
+    Loader.SetTranslation(vect(0,0,0));
+    Loader.ForceUpdate(true);
+    Centre = Loader.Bounds.Origin;
+    Extent = Loader.Bounds.BoxExtent;
+    if (VSize(Extent) < 0.5 || VSize(Centre) > 50) { Centre = vect(0,0,0); Extent = vect(1.2,0.8,4.5); }
+    Loader.SetScale(GunScale());
+    Q = Gun.MySkelMesh.GetBoneQuaternion(LoadedBone);
+    At = Gun.MySkelMesh.GetBoneLocation(LoadedBone) + QuatRotateVector(Q, Centre * GunScale());
+    Owner.Dropped.Drop(Mesh, Loader.GetMaterial(0), Loader.GetMaterial(1), At, Q, vect(0,0,-60),
+        GunScale(), Centre, Extent, Loader.GetMaterial(2));
+}
+
+// The gun's own magazine-in and slide/bolt sounds, from the reload clip stock
+// just started (paused at its first frame, so none of them has played).
+function FindReloadSounds()
+{
+    local AnimNodeSequence Node;
+    local AnimNotify_AkEvent Notify;
+    local string Label;
+    local int I;
+    MagInSound = None; RackSound = None;
+    Node = Gun.WeaponAnimSeqNode;
+    if (Node == None || Node.AnimSeq == None) return;
+    for (I = 0; I < Node.AnimSeq.Notifies.Length; ++I)
+    {
+        Notify = AnimNotify_AkEvent(Node.AnimSeq.Notifies[I].Notify);
+        if (Notify == None || Notify.AkEvent == None) continue;
+        Label = Locs(string(Notify.AkEvent.Name));
+        if (InStr(Label, "slide") >= 0 || InStr(Label, "bolt") >= 0 || InStr(Label, "rack") >= 0
+            || InStr(Label, "cock") >= 0 || InStr(Label, "release") >= 0 || InStr(Label, "charge") >= 0)
+            RackSound = Notify.AkEvent;
+        else if (InStr(Label, "magin") >= 0 || InStr(Label, "mag_in") >= 0 || InStr(Label, "insert") >= 0)
+            MagInSound = Notify.AkEvent;
+    }
 }
 
 // The clip's seating moment: the loader nearest the cylinder after the
@@ -409,7 +456,13 @@ function Tick()
             Loader.SetHidden(true);
             ShowRounds(true);
             Owner.Pulse(1 << GunHand, 0.7, 0.04);
-            if (bMagazine) { Complete(); return; }
+            if (bMagazine)
+            {
+                if (MagInSound != None) Gun.PlaySoundBase(MagInSound, true);
+                if (RackSound != None) Gun.PlaySoundBase(RackSound, true);
+                Complete();
+                return;
+            }
             PlayCue(class'VRBreakCatalog'.default.Profiles[Profile].InsertB);
         }
         return;
