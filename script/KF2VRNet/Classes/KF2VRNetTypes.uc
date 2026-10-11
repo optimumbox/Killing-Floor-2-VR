@@ -2,9 +2,11 @@
 class KF2VRNetTypes extends Object abstract;
 
 const ProtocolVersion = 2;
-const PackageRevision = 17;
+const PackageRevision = 18;
 const PoseLeaseSeconds = 0.25;
-const ClientPoseInterval = 0.0333333;
+// 120 Hz, or every frame on a slower headset. Needs the host's 120 Hz tick.
+const ClientPoseInterval = 0.0083333;
+const PoseNetSpeed = 150000;
 
 // Complete server hand pair plus the last processed owner intent. The actor
 // channel owns the connection lifetime; Human owns the possession lifetime.
@@ -79,6 +81,11 @@ struct NetPoseSample
     // An open hand is curl 0 with 16|32 set; a clenched fist (VRPhysicalFist,
     // grip >= 0.35) is curl >= 5 without 64.
     var byte LeftHandPose, RightHandPose;
+    // PresentationFlags 64: the sender's clock (milliseconds, wrapping at
+    // 65536) and the pawn yaw the offsets above were taken against. Receivers
+    // time interpolation and rotate the offsets by these, not by arrival
+    // order and their own copy of the pawn's yaw.
+    var int SampleMillis, RootYaw;
 };
 
 // One replicated property groups root and pose; no cross-actor ordering assumed.
@@ -124,7 +131,9 @@ static final function bool IsCanonicalRotation(rotator Value)
 static final function bool IsValidSample(NetPoseSample Sample)
 {
     if (Sample.Sequence < 0 || Sample.Sequence > 65535
-        || Sample.TrackingFlags > 7 || Sample.PresentationFlags > 63
+        || Sample.TrackingFlags > 7 || Sample.PresentationFlags > 127
+        || Sample.SampleMillis < 0 || Sample.SampleMillis > 65535
+        || Sample.RootYaw < -32768 || Sample.RootYaw > 65535
         || Sample.ReferenceEpoch < 0
         || Sample.LeftHandPose > 127 || Sample.RightHandPose > 127
         || !IsBoundedVector(Sample.HeadPosition, 160.0)

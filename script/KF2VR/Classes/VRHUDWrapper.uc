@@ -2,13 +2,16 @@
 // Suppress only the exact icon with an already placed stereo replacement.
 class VRHUDWrapper extends KFGFxHudWrapper;
 
-// A teammate with a VR world tag (VRSpatialHUD.PlaceTeammateTags) is not also
-// drawn flat. Counting it as drawn keeps the stock hidden-player icon off it.
+// A visible teammate gets a VR world tag (VRSpatialHUD.PlaceTeammateTags) and
+// is never also drawn flat: single-pass stereo puts the flat Canvas bar in one
+// eye only. Counting it as drawn keeps the stock hidden-player icon off it; an
+// unseen teammate still gets the stock icon.
 simulated function bool DrawFriendlyHumanPlayerInfo(KFPawn_Human KFPH)
 {
     local VRHUDMovie Movie;
     Movie = VRHUDMovie(HudMovie);
-    if (Movie != None && Movie.SpatialHUD != None && Movie.SpatialHUD.HasTeammateTag(KFPH)) return true;
+    if (Movie != None && Movie.SpatialHUD != None
+        && (Movie.SpatialHUD.HasTeammateTag(KFPH) || Movie.SpatialHUD.TeammateTagVisible(KFPH))) return true;
     return super.DrawFriendlyHumanPlayerInfo(KFPH);
 }
 

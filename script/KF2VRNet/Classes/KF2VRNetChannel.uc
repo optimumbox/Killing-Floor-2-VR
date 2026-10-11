@@ -811,14 +811,15 @@ unreliable server function ServerSubmitPose(NetPoseSample Sample, optional NetMo
 {
     local float Now;
     Now = WorldInfo.RealTimeSeconds;
-    // Fixed work and storage per owner, at most 60 samples in one real second.
+    // Fixed work and storage per owner, at most 150 samples in one real
+    // second (senders run at 120 Hz).
     if (Now - RateWindowStart >= 1.0)
     {
         RateWindowStart = Now;
         RateWindowCount = 0;
     }
-    RateWindowCount = Min(RateWindowCount + 1, 61);
-    if (RateWindowCount > 60 || !bHandshakeAccepted || (!bSyntheticEnabled && !bVRTrackingEnabled)
+    RateWindowCount = Min(RateWindowCount + 1, 151);
+    if (RateWindowCount > 150 || !bHandshakeAccepted || (!bSyntheticEnabled && !bVRTrackingEnabled)
         || (bSyntheticEnabled && !bSyntheticAllowed) || BoundPawn == None || PublicPose == None
         || BoundPawn.bDeleteMe || BoundPawn.Health <= 0
         || KF2VRNetPlayerController(Owner) == None

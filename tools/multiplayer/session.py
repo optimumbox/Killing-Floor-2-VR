@@ -48,7 +48,9 @@ def replay_core_evidence(logs, *, native_replay=False, server_adapter=False,
 
 
 # Bytes/second per connection, for both the hosted server and every client.
-NET_RATE = "40000"
+NET_RATE = "150000"
+# Host tick rate: VR players send their pose at 120 Hz (stock servers tick at 30).
+SERVER_TICK_RATE = "120"
 CONFIG_KINDS = ("ENGINE", "GAME", "INPUT", "UI", "WEB", "SYSTEMSETTINGS", "LIGHTMASS", "BENCHMARKING", "MAP")
 
 
@@ -204,8 +206,8 @@ def role_config(run: Path, role: str, user: Path, package_dir: Path, game: Path,
     # Match the playable launcher: the stock Steam lobby path expects the
     # Vivox interface to exist even for synthetic desktop clients.
     engine = set_ini(engine, "VoIP", {"bHasVoiceEnabled": "false" if role == "server" else "true"})
-    # Every VR player's always-relevant pose actor reaches every client, ~15 kB/s
-    # (up to ~22 kB/s) per client with six players, above stock's 10 kB/s
+    # Every VR player's always-relevant pose actor reaches every client at
+    # 120 Hz, tens of kB/s per client with six players, far above stock's 10 kB/s
     # internet cap. The client asks for ConfiguredInternetSpeed (LanSpeed for a
     # LAN URL); the server clamps that to MaxClientRate and, for an internet
     # connection, MaxInternetClientRate. Raise every link of that chain.
@@ -217,7 +219,8 @@ def role_config(run: Path, role: str, user: Path, package_dir: Path, game: Path,
         # KF2's default 1s unverified handshake limit expires while a cold
         # local client blocks loading its startup menu/EOS state. Friend co-op
         # tolerates that startup delay; this does not delay in-game input.
-        engine = set_ini(engine, "IpDrv.TcpNetDriver", {"HandShakeTimeOutSec": "60"})
+        engine = set_ini(engine, "IpDrv.TcpNetDriver", {"HandShakeTimeOutSec": "60",
+            "NetServerMaxTickRate": SERVER_TICK_RATE, "LanServerMaxTickRate": SERVER_TICK_RATE})
     native_driver = native_replay and (role == "driver" or (dual_vr_owners and role == "observer"))
     if native_replay and role != "server":
         engine = set_ini(engine, "Engine.Engine", {"GameViewportClientClassName": "KF2VRNetClient.KF2VRNetViewportClient"})

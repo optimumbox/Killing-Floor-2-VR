@@ -661,8 +661,11 @@ function PublishTrackedPose(vector Head, rotator HeadAim, vector LeftHand,
         || NetChannel == None || !NetChannel.bVRTrackingEnabled || NetChannel.PawnEpoch == 0
         || DiagnosticDropoutStep == 1
         || WorldInfo.RealTimeSeconds < NextTrackedPoseTime) return;
-    NextTrackedPoseTime = WorldInfo.RealTimeSeconds + class'KF2VRNetTypes'.const.ClientPoseInterval;
-    Root.Yaw = Pawn.Rotation.Yaw;
+    // Keep the cadence. Restarting the wait from this frame rounded every
+    // interval up to whole frames (30 Hz sent ~22 Hz at 90 fps).
+    NextTrackedPoseTime = FMax(NextTrackedPoseTime + class'KF2VRNetTypes'.const.ClientPoseInterval,
+        WorldInfo.RealTimeSeconds);
+    Root.Yaw = NormalizeRotAxis(Pawn.Rotation.Yaw);
     Sample.WorldEpoch = NetChannel.WorldEpoch;
     Sample.ConnectionEpoch = NetChannel.ConnectionEpoch;
     Sample.PawnEpoch = NetChannel.PawnEpoch;
@@ -708,6 +711,9 @@ function PublishTrackedPose(vector Head, rotator HeadAim, vector LeftHand,
     // Low byte left, next byte right (KF2VRNetTypes.NetPoseSample encoding).
     if ((TrackingFlags & 2) != 0) Sample.LeftHandPose = HandPoses & 255;
     if ((TrackingFlags & 4) != 0) Sample.RightHandPose = (HandPoses >> 8) & 255;
+    Sample.SampleMillis = int(WorldInfo.RealTimeSeconds * 1000.0) & 65535;
+    Sample.RootYaw = Root.Yaw;
+    Sample.PresentationFlags = Sample.PresentationFlags | 64;
     NetChannel.ServerSubmitPose(Sample);
 }
 

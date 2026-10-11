@@ -217,10 +217,12 @@ class SoloLauncherTests(unittest.TestCase):
         for name in ("server", "driver"):
             role = friends.configure_role(self.root / name, name, user, self.root / "game", args)
             engine = read_ini(Path(role["config_root"]) / "KFEngine.ini")
-            self.assertEqual(("40000", "40000"), tuple(values(engine, "Engine.Player")[key]
+            self.assertEqual(("150000", "150000"), tuple(values(engine, "Engine.Player")[key]
                              for key in ("ConfiguredInternetSpeed", "ConfiguredLanSpeed")))
             net = values(engine, "IpDrv.TcpNetDriver")
-            self.assertEqual(("40000", "40000"), (net["MaxClientRate"], net["MaxInternetClientRate"]))
+            self.assertEqual(("150000", "150000"), (net["MaxClientRate"], net["MaxInternetClientRate"]))
+            ticks = (net.get("NetServerMaxTickRate"), net.get("LanServerMaxTickRate"))
+            self.assertEqual(("120", "120") if name == "server" else (None, None), ticks)
             self.assertEqual(2, len(re.findall(r"(?m)^DownloadManagers=", engine)))
         self.assertEqual(before, config_hashes(user))
 

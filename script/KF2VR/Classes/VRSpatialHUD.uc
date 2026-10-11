@@ -550,13 +550,17 @@ simulated function PlaceTeammateTags()
             if (Used >= TeammateSlots) break;
             if (P == PC.Pawn || !P.IsAliveAndWell() || P.Mesh.SkeletalMesh == None || !P.Mesh.bAnimTreeInitialised
                 || KFPlayerReplicationInfo(P.PlayerReplicationInfo) == None
-                || WorldInfo.TimeSeconds - P.Mesh.LastRenderTime >= 0.2) continue;
+                || !TeammateTagVisible(P)) continue;
             At = TeammateTagLocation(P);
             if ((Normal(At - ViewLocation) dot vector(ViewRotation)) <= 0) continue;
             if (Teammates[Used] != P)
             {
                 Teammates[Used] = P;
                 Panels[TeammateFirst + Used].bDrawn = false;
+                // Redraw even when the content is unchanged: a teammate back in
+                // view keeps his key, and the tag stayed undrawn until his
+                // health changed while the flat bar showed in one eye.
+                ContentKey[TeammateFirst + Used] = "";
             }
             Dirty(TeammateFirst + Used, TeammateKey(P));
             // About 7 degrees wide at any range, never under 12 cm.
@@ -570,6 +574,13 @@ simulated function PlaceTeammateTags()
         Teammates[I] = None;
         Panels[TeammateFirst + I].HidePanel();
     }
+}
+
+// Whether a teammate qualifies for a world tag: rendered within 0.4 s (stock's
+// friendly-info window), so brief occlusion does not drop the tag.
+simulated function bool TeammateTagVisible(KFPawn_Human P)
+{
+    return P != None && P.Mesh != None && WorldInfo.TimeSeconds - P.Mesh.LastRenderTime < 0.4;
 }
 
 // True while this teammate's world tag is on screen, so the flat draw is skipped.
