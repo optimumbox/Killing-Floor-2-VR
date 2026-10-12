@@ -13,7 +13,6 @@
 
 $ErrorActionPreference = 'Stop'
 $ItemId = '3817663661'
-$ItemFolder = 'KF2VR'
 $AppId = '232090'
 $Title = 'KF2-VR setup'
 $Test = [bool]$env:KF2VR_TEST_CONFIG
@@ -120,7 +119,17 @@ else {
     }
     $library = $libraries | Where-Object { Test-Path (Join-Path $_ "steamapps\appmanifest_$AppId.acf") } | Select-Object -First 1
     if (-not $library) { Say "Killing Floor 2 isn't installed. Install it in Steam, then run this setup again."; return }
-    $play = Join-Path $library "steamapps\workshop\content\$AppId\$ItemId\$ItemFolder\Play.cmd"
+    $item = Join-Path $library "steamapps\workshop\content\$AppId\$ItemId"
+    # The item's top-level Play.cmd is the stable entry point.
+    $play = Join-Path $item 'Play.cmd'
+    if ((Test-Path $item) -and -not (Test-Path $play)) {
+        Start-Process 'steam://open/downloads'
+        Say ("Steam is still downloading the latest KF2VR.`n`n" +
+             "Steam's Downloads page is opening: wait until KF2VR finishes, then run this setup again.`n`n" +
+             "If nothing is downloading after a minute, open the KF2VR Workshop page, click Unsubscribe, " +
+             "then Subscribe again, and run this setup again once it has downloaded.")
+        return
+    }
     if (-not (Test-Path $play)) {
         Start-Process "steam://url/CommunityFilePage/$ItemId"
         Say ("Almost there.`n`n1. Steam is opening the KF2-VR Workshop page: click Subscribe.`n" +
