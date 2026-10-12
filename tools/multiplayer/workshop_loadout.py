@@ -93,11 +93,12 @@ def parse_mods(value):
 # launch, and only a profile with nothing in it falls back to the shipped
 # default. Saved play mode applies to Host and Solo; a friend joining still gets the
 # flat screen unless they ask for --vr.
-# The mod's own Steam Workshop item (KF2VR, KF2VRNet, KF2VRNetClient and
-# KF2VRHands), offered by a host so desktop players without the release can join.
-KF2VR_WORKSHOP_ID = "3815925510"
-# The full mod (launcher, runtime and packages) for players who want VR.
-KF2VR_FULL_WORKSHOP_ID = "3817663661"
+# The mod's Steam Workshop item, KF2VR: the full mod for VR players, with its
+# game packages (KF2VR, KF2VRNet, KF2VRNetClient, KF2VRHands) in BrewedPC, where
+# plain KF2 loads them, so desktop players joining a host need only this item.
+# (3815925510, the older packages-only item, is superseded.)
+KF2VR_WORKSHOP_ID = "3817663661"
+KF2VR_FULL_WORKSHOP_ID = KF2VR_WORKSHOP_ID
 KF2VR_FULL_WORKSHOP_URL = "https://steamcommunity.com/sharedfiles/filedetails/?id=" + KF2VR_FULL_WORKSHOP_ID
 DLSS_MODES = ("off", "dlaa", "quality", "balanced", "performance", "ultraperformance")
 
