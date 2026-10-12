@@ -85,6 +85,17 @@ var int PreviousWatchArmor;
 var float WatchArmorWarningUntil;
 var string WatchAlertLabel;
 var bool bWatchAlertCritical;
+// Chat on the watch: another player's message chimes and double-buzzes the
+// watch hand, and the watch pulses a light until the wrist is turned to read
+// it. Turned toward the eyes, the message replaces the supplies strip
+// (grenades and dosh) for ChatShowSeconds, then the strip returns.
+var string ChatSender, ChatText;
+var bool bChatUnread;
+var float ChatShownUntil, ChatBuzzAt, ChatShowSeconds, ChatLookDot, ChatLightBrightness, ChatLightRadius;
+var color ChatBlue;
+var PointLightComponent ChatLight, ChatLightTemplate;
+var AkEvent ChatPing;
+var bool bChatPingTried;
 var VRHUDStatus StatusFeed;
 var VRCommandoHealthbars CommandoHealthbars;
 var VRZedMarkers ZedMarkers;
@@ -191,6 +202,91 @@ simulated function PulseWatchHand(float Strength, float Duration)
     Bridge.NativeHapticMask = Bridge.NativeHapticMask | (1 << Hand);
     Bridge.NativeHapticStrength = FMax(Bridge.NativeHapticStrength, Strength);
     Bridge.NativeHapticDuration = FMax(Bridge.NativeHapticDuration, Duration);
+}
+
+simulated function ReceiveChat(string Sender, string Message)
+{
+    if (Bridge == None || !Bridge.bWristwatchHUD || Message == "") return;
+    ChatSender = Sender;
+    ChatText = Message;
+    bChatUnread = true;
+    ChatShownUntil = 0;
+    // A phone's double buzz: one now, one a moment later (UpdateWatchChat).
+    PulseWatchHand(0.6, 0.12);
+    ChatBuzzAt = WorldInfo.RealTimeSeconds + 0.22;
+    if (!bChatPingTried)
+    {
+        bChatPingTried = true;
+        ChatPing = AkEvent(DynamicLoadObject("WW_UI_PlayerCharacter.Play_UI_Collectible_Hit", class'AkEvent', true));
+    }
+    if (ChatPing != None && Bridge.PC != None) Bridge.PC.PlaySoundBase(ChatPing, true);
+}
+
+simulated function bool ChatShowing()
+{
+    return ChatShownUntil > WorldInfo.RealTimeSeconds && ChatText != "";
+}
+
+// The display front is the panel's -X face; it is being read when it points
+// at the eyes.
+simulated function bool WatchFacesHead(vector Position, rotator Orientation)
+{
+    return Normal(Bridge.HeadPosition - Position) dot -vector(Orientation) >= ChatLookDot;
+}
+
+simulated function UpdateWatchChat()
+{
+    local vector Position;
+    local rotator Orientation;
+    local float Now;
+    Now = WorldInfo.RealTimeSeconds;
+    if (ChatBuzzAt > 0 && Now >= ChatBuzzAt) { ChatBuzzAt = 0; PulseWatchHand(0.6, 0.12); }
+    if (!GetWristwatchTransform(Position, Orientation)) { SetChatLight(false, Position, Orientation); return; }
+    if (bChatUnread && WatchFacesHead(Position, Orientation))
+    {
+        bChatUnread = false;
+        ChatShownUntil = Now + ChatShowSeconds;
+    }
+    if (ChatShownUntil > 0 && Now >= ChatShownUntil) ChatShownUntil = 0;
+    SetChatLight(bChatUnread, Position, Orientation);
+}
+
+// A soft blue glow from the watch face, breathing about once a second.
+simulated function SetChatLight(bool bOn, vector Position, rotator Orientation)
+{
+    if (!bOn)
+    {
+        if (ChatLight != None && ChatLight.bEnabled) ChatLight.SetEnabled(false);
+        return;
+    }
+    if (ChatLight == None)
+    {
+        ChatLight = new(self) class'PointLightComponent'(ChatLightTemplate);
+        AttachComponent(ChatLight);
+        ChatLight.SetRadius(ChatLightRadius);
+    }
+    ChatLight.SetTranslation((Position - vector(Orientation) * 2.0 - Location) << Rotation);
+    ChatLight.SetLightProperties(ChatLightBrightness * (0.25 + 0.75 * Square(Sin(WorldInfo.RealTimeSeconds * Pi * 1.1))),
+        ChatBlue);
+    if (!ChatLight.bEnabled) ChatLight.SetEnabled(true);
+}
+
+// Sender above, then the message on up to two lines, split at a space.
+simulated function WatchChat(Canvas C, float X, float Width)
+{
+    local string First, Second;
+    local int Split;
+    Text(C, "FROM" @ Caps(ChatSender), X, 326, Width, 28, ChatBlue, true);
+    First = ChatText;
+    if (Len(First) > 26)
+    {
+        Split = InStr(Mid(First, Len(First) / 2), " ");
+        Split = Split >= 0 ? Len(First) / 2 + Split : Len(First) / 2;
+        Second = Mid(First, Split + 1);
+        First = Left(First, Split);
+    }
+    Text(C, First, X, 354, Width, Second != "" ? 24 : 44, WatchInk, true);
+    if (Second != "") Text(C, Second, X, 378, Width, 24, WatchInk, true);
 }
 
 simulated function bool WavePriorityActive()
@@ -621,7 +717,10 @@ simulated function UpdateDisplay()
         LastValues = WorldInfo.RealTimeSeconds;
     }
     if (Bridge.bWristwatchHUD)
+    {
         PlaceWristwatch();
+        UpdateWatchChat();
+    }
     else
         Panels[0].PlacePanel(Bridge.HudStatusPosition, Bridge.HudStatusRotation, Bridge.HudStatusSize, (Bridge.NativeHudMask & 1) != 0);
     PlaceWeaponReadout(0);
@@ -877,7 +976,8 @@ simulated function ReadValues()
         @ Dosh @ Grenades @ GrenadeLimit @ GrenadeImagePath @ BuffKey @ WatchAlertLabel @ bWatchAlertCritical
         @ bSessionSupported @ bWaveActive @ WaveNumber @ WaveLabel @ SessionLabel @ SessionValue @ int(WaveClear * 24)
         @ bBossActive @ BossLabel @ int(BossHealth * 100) @ bTraderNavActive @ (bTraderNavActive ? int(TraderBearingAngle * 8) : 0)
-        @ int(TraderDistance) @ TraderElevationDiff @ int(ObjectiveProgress * 100) @ bObjectiveWarning);
+        @ int(TraderDistance) @ TraderElevationDiff @ int(ObjectiveProgress * 100) @ bObjectiveWarning
+        @ ChatShowing() @ ChatSender @ ChatText);
     Dirty(3, WaveLabel @ SessionLabel @ SessionValue @ BossLabel @ int(BossHealth * 1000) @ bBossActive
         @ ObjectiveTitle @ ObjectiveText @ int(ObjectiveProgress * 1000) @ ObjectiveReward @ bObjectiveWarning @ string(ObjectiveImage)
         @ Dosh @ Bridge.NativeHudDetail
@@ -1466,7 +1566,7 @@ simulated function RenderWatchFace(Canvas C)
             }
             else if (WaveClear >= 0) Segments(C, 560, 308, 424, 14, 24, WaveClear, Amber, 4);
         }
-        WatchSupplies(C, 560, 424);
+        if (ChatShowing()) WatchChat(C, 560, 424); else WatchSupplies(C, 560, 424);
     }
     else
     {
@@ -1482,7 +1582,7 @@ simulated function RenderWatchFace(Canvas C)
             if (TraderElevationDiff != 0) WatchChevron(C, 952, 276, 32, TraderElevationDiff > 0, Amber);
         }
         else Text(C, "NO FIX", 822, 270, 162, 44, WatchMuted, true, true);
-        WatchSupplies(C, 560, 424);
+        if (ChatShowing()) WatchChat(C, 560, 424); else WatchSupplies(C, 560, 424);
     }
     WatchRule(C, 560, 404, 424);
     if (WatchAlertLabel != "")
@@ -1739,6 +1839,7 @@ simulated event Destroyed()
     if (ZedMarkers != None) { ZedMarkers.Destroy(); ZedMarkers = None; }
     if (LockOnMarkers != None) { LockOnMarkers.Destroy(); LockOnMarkers = None; }
     if (DamagePopups != None) { DamagePopups.Destroy(); DamagePopups = None; }
+    if (ChatLight != None) { DetachComponent(ChatLight); ChatLight = None; }
     Movie = VRHUDMovie(SourceMovie);
     if (Movie != None && Movie.SpatialHUD == self) Movie.SpatialHUD = None;
     for (I = 0; I < 12; ++I) if (Panels[I] != None) Panels[I].Destroy();
@@ -1747,6 +1848,26 @@ simulated event Destroyed()
 
 defaultproperties
 {
+    // A template only: never in Components, so nothing attaches it until a
+    // message is waiting.
+    Begin Object Class=PointLightComponent Name=WatchChatGlow
+        FalloffExponent=2
+        bDisableSpecular=true
+        CastShadows=false
+        CastStaticShadows=false
+        CastDynamicShadows=false
+        bEnabled=false
+        bForceDynamicLight=true
+        bCanAffectDynamicPrimitivesOutsideDynamicChannel=true
+        bOverrideAutoLightingChannels=true
+        LightingChannels=(Indoor=true,Outdoor=true,Dynamic=true,bInitialized=true)
+    End Object
+    ChatLightTemplate=WatchChatGlow
+    ChatShowSeconds=8.0
+    ChatLookDot=0.6
+    ChatLightBrightness=1.4
+    ChatLightRadius=48.0
+    ChatBlue=(R=64,G=168,B=255,A=255)
     RemoteRole=ROLE_None
     TickGroup=TG_PostUpdateWork
     Ink=(R=234,G=234,B=228,A=255)

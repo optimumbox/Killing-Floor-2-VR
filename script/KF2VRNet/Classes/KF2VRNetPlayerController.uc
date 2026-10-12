@@ -220,6 +220,24 @@ replication
         NetChannel, DiagnosticTarget, DiagnosticPair, DiagnosticPairedIndex, DiagnosticPairRestored;
 }
 
+// Another player's chat line also goes to this player's VR wristwatch, which
+// chimes, buzzes and lights until the wrist is turned to read it.
+reliable client event TeamMessage(PlayerReplicationInfo PRI, coerce string S, name Type, optional float MsgLifeTime)
+{
+    local VRSpatialHUD HUD;
+    Super.TeamMessage(PRI, S, Type, MsgLifeTime);
+    if (PRI == None || PRI == PlayerReplicationInfo || (Type != 'Say' && Type != 'TeamSay')) return;
+    // Team chat from the other team never reached the stock chat box either.
+    if (Type == 'TeamSay' && PRI.Team != None && PlayerReplicationInfo != None && PlayerReplicationInfo.Team != None
+        && PRI.Team.TeamIndex != PlayerReplicationInfo.Team.TeamIndex) return;
+    foreach DynamicActors(class'VRSpatialHUD', HUD)
+        if (HUD.PC == self)
+        {
+            HUD.ReceiveChat(PRI.PlayerName, S);
+            return;
+        }
+}
+
 reliable server function ServerBeginPairedCase(int Index)
 {
     local class<KFWeap_DualBase> StockClass;
