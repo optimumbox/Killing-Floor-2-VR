@@ -364,6 +364,12 @@ def ensure_item(item_id, game, cache, steam_root, *, download):
             raise RuntimeError(f"Workshop {item_id} is missing. Subscribe/download in Steam or launch once without -PrepareOnly.")
         executable = Path(steam_root) / "steamcmd.exe"
         if not executable.is_file():
+            # A fresh copy (the Workshop launcher's) has no SteamCMD yet; fetch
+            # the pinned one, as the test map and the server installer do.
+            from dependencies import extract_verified
+            Path(steam_root).mkdir(parents=True, exist_ok=True)
+            extract_verified("steamcmd.zip", Path(steam_root) / "steamcmd.zip", Path(steam_root))
+        if not executable.is_file():
             raise RuntimeError("SteamCMD is missing. Install the local server or subscribe to the item in Steam first.")
         log = Path(steam_root) / f"workshop-{item_id}.log"
         startup = subprocess.STARTUPINFO()
