@@ -55,6 +55,13 @@ def launch_notices(store):
     return security, PROGRESSION_WARNING
 
 
+def server_install_failure(output, code):
+    """The installer's own plain-language reason (a full disk), not just its exit code."""
+    match = re.search(r"(Not enough free disk space.*?try again\.|The disk ran out of space.*?try again\.)",
+                      re.sub(r"\s+", " ", output))
+    return match.group(1) if match else f"The dedicated server could not be installed (exit {code}); see the details below."
+
+
 def save_session_record(output, record):
     """Publish a complete session record despite a concurrent watchdog read."""
     temporary = output.with_suffix(".tmp")
@@ -957,8 +964,12 @@ def main():
             # PowerShell 7's inherited module path can hide Windows PowerShell
             # 5.1 built-ins. Let the shipped Windows shell initialize its own.
             install_env = {k: v for k, v in install_env.items() if k.upper() != "PSMODULEPATH"}
-            subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                str(ROOT / "tools/install-multiplayer-server.ps1"), "-ServerRoot", str(args.server_root)], check=True, env=install_env)
+            installer = subprocess.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                str(ROOT / "tools/install-multiplayer-server.ps1"), "-ServerRoot", str(args.server_root)],
+                env=install_env, capture_output=True, text=True, errors="replace")
+            print(installer.stdout + installer.stderr, end="", flush=True)
+            if installer.returncode != 0:
+                raise RuntimeError(server_install_failure(installer.stdout + installer.stderr, installer.returncode))
             server_deployment = NativeDeployment(ROOT / "ServerNative", args.server_root / "Binaries/Win64",
                 run / "server-native-backup", {"artifacts_sha256": manifest["native_build"]["server_artifacts_sha256"]},
                 digest, server=True)

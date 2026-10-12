@@ -3,7 +3,8 @@
 param(
     [string]$ServerRoot,
     [switch]$Update,
-    [ValidateRange(60,7200)][int]$TimeoutSeconds = 1800
+    [ValidateRange(60,7200)][int]$TimeoutSeconds = 1800,
+    [int]$MinimumFreeGB = 35
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Split-Path $PSScriptRoot -Parent))
@@ -20,6 +21,14 @@ if (-not $Update -and (Test-Path -LiteralPath $receiptPath) -and (Test-Path -Lit
 }
 $steamRoot = Join-Path $projectRoot 'build/multiplayer/steamcmd'
 New-Item -ItemType Directory -Path $steamRoot,$ServerRoot -Force | Out-Null
+# The dedicated server is about 31 GB. SteamCMD reports a full disk only as
+# an opaque "state is 0x202"; say so plainly before downloading anything.
+$drive = [IO.Path]::GetPathRoot((Get-Item -LiteralPath $ServerRoot).FullName)
+$freeGB = [Math]::Floor((New-Object IO.DriveInfo $drive).AvailableFreeSpace / 1GB)
+if (-not (Test-Path -LiteralPath $serverExe) -and $freeGB -lt $MinimumFreeGB) {
+    throw ("Not enough free disk space to install the KF2 dedicated server: it needs about $MinimumFreeGB GB " +
+           "on $drive and only $freeGB GB is free. Free up space on $drive and try again.")
+}
 $steamExe = Join-Path $steamRoot 'steamcmd.exe'
 if (-not (Test-Path -LiteralPath $steamExe)) {
     $archive = Join-Path $steamRoot 'steamcmd.zip'
@@ -62,6 +71,9 @@ try {
         $logText = Get-Content -LiteralPath $log -Raw
     }
     if ($owned.ExitCode -ne 0 -or $logText -notmatch "Success! App '232130' fully installed" -or -not (Test-Path -LiteralPath $serverExe)) {
+        if ($logText -match "state is 0x202") {
+            throw "The disk ran out of space while installing the KF2 dedicated server ($drive). Free up space and try again."
+        }
         throw "Dedicated server installation did not complete; see $log"
     }
     $record['server_sha256'] = (Get-FileHash -LiteralPath $serverExe -Algorithm SHA256).Hash
