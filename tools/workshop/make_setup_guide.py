@@ -31,7 +31,7 @@ def main():
     draw.text((W / 2, 60), "KF2VR - one-minute setup", fill=TEXT, font=font(52, True), anchor="mm")
     draw.text((W / 2, 112), "Do this once. After that, just press Play.", fill=DIM, font=font(28), anchor="mm")
     top, step_h = 160, 196
-    steps = ["Click Subscribe on this page, then wait for the download to finish.",
+    steps = ["Click Subscribe. Then press Play on KF2 once and quit, so Steam downloads it.",
              "Hold the Windows key and press R. A small Run box opens.",
              "Paste the line from this page into the box and press Enter.",
              "Click OK. Steam closes and opens again by itself.",

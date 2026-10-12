@@ -124,16 +124,18 @@ else {
     $play = Join-Path $item 'Play.cmd'
     if ((Test-Path $item) -and -not (Test-Path $play)) {
         Start-Process 'steam://open/downloads'
-        Say ("Steam is still downloading the latest KF2VR.`n`n" +
-             "Steam's Downloads page is opening: wait until KF2VR finishes, then run this setup again.`n`n" +
-             "If nothing is downloading after a minute, open the KF2VR Workshop page, click Unsubscribe, " +
-             "then Subscribe again, and run this setup again once it has downloaded.")
+        Say ("Steam hasn't finished downloading KF2VR yet.`n`n" +
+             "Steam often waits for the game to start before it downloads Workshop items:`n" +
+             "1. Press Play on Killing Floor 2.`n2. Wait for the main menu, then quit the game.`n" +
+             "3. Run this setup again.`n`n" +
+             "Still not working? On the KF2VR Workshop page click Unsubscribe, then Subscribe, and repeat.")
         return
     }
     if (-not (Test-Path $play)) {
         Start-Process "steam://url/CommunityFilePage/$ItemId"
-        Say ("Almost there.`n`n1. Steam is opening the KF2-VR Workshop page: click Subscribe.`n" +
-             "2. Wait until the download finishes (Steam > Downloads).`n3. Run this setup again.")
+        Say ("Almost there.`n`n1. Steam is opening the KF2VR Workshop page: click Subscribe.`n" +
+             "2. Press Play on Killing Floor 2 once, wait for the main menu, then quit`n" +
+             "   (Steam downloads KF2VR when the game starts).`n3. Run this setup again.")
         return
     }
     $configs = @(Get-ChildItem (Join-Path $steam 'userdata\*\config\localconfig.vdf') -ErrorAction SilentlyContinue)
