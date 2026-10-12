@@ -1,13 +1,15 @@
 # KF2-VR Workshop setup: puts the "Play in VR / Play normally" choice on
 # Killing Floor 2's Play button. Run it again to take it off.
 #
-# Players run one line (Windows+R, paste, Enter):
-#   powershell -ep bypass -c "irm https://raw.githubusercontent.com/optimumbox/Killing-Floor-2-VR/vr-dlss-fixes/tools/workshop/KF2VR-Setup.ps1|iex"
-#
-# It finds Killing Floor 2 in any Steam library, checks the Workshop item has
-# downloaded (opening its page to subscribe if not), closes Steam briefly,
-# writes the game's Launch Options for every Steam account on this PC (after a
-# backup) and starts Steam again. No parameters, so it also runs through iex.
+# Players double-click "Setup KF2VR.cmd" in the downloaded Workshop item, which
+# runs this copy beside it: Play.cmd is then in the same folder. It closes Steam
+# briefly, writes the game's Launch Options for every Steam account on this PC
+# (after a backup) and starts Steam again.
+# Older instructions ran it from GitHub instead (Windows+R):
+#   powershell -ep bypass -c irm https://raw.githubusercontent.com/optimumbox/Killing-Floor-2-VR/vr-dlss-fixes/tools/workshop/KF2VR-Setup.ps1|iex
+# That copy finds Killing Floor 2 in any Steam library and checks the item has
+# downloaded (opening its page to subscribe if not). No parameters, so it also
+# runs through iex.
 # Testing: set $env:KF2VR_TEST_CONFIG to a copy of localconfig.vdf and
 # $env:KF2VR_TEST_PLAY to a Play.cmd path; Steam is then left alone.
 
@@ -108,7 +110,16 @@ if ($Test) { $steam = 'TEST' }
 if (-not $steam) { Say "Steam isn't installed on this PC. Install Steam and Killing Floor 2 first."; return }
 $steam = $steam.Replace('/', '\')
 
-if ($Test) { $play = $env:KF2VR_TEST_PLAY; $configs = @(Get-Item $env:KF2VR_TEST_CONFIG) }
+if ($Test) {
+    $play = if ($env:KF2VR_TEST_PLAY) { $env:KF2VR_TEST_PLAY } else { Join-Path $PSScriptRoot 'Play.cmd' }
+    $configs = @(Get-Item $env:KF2VR_TEST_CONFIG)
+}
+elseif ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'Play.cmd'))) {
+    # Run from inside the downloaded item (Setup KF2VR.cmd): Play.cmd is right here.
+    $play = Join-Path $PSScriptRoot 'Play.cmd'
+    $configs = @(Get-ChildItem (Join-Path $steam 'userdata\*\config\localconfig.vdf') -ErrorAction SilentlyContinue)
+    if ($configs.Count -eq 0) { Say "Start Steam and log in once, then run this setup again."; return }
+}
 else {
     $libraries = @($steam)
     $folders = Join-Path $steam 'steamapps\libraryfolders.vdf'

@@ -28,40 +28,56 @@ def button(draw, x, y, label, fill, w=260, h=60):
 def main():
     image = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(image)
-    draw.text((W / 2, 60), "KF2VR - one-minute setup", fill=TEXT, font=font(52, True), anchor="mm")
-    draw.text((W / 2, 112), "Do this once. After that, just press Play.", fill=DIM, font=font(28), anchor="mm")
+    draw.text((W / 2, 60), "KF2VR - VR setup", fill=TEXT, font=font(52, True), anchor="mm")
+    draw.text((W / 2, 112), "Do this once. Desktop players only need step 1.", fill=DIM, font=font(28), anchor="mm")
     top, step_h = 160, 196
-    steps = ["Click Subscribe. Then press Play on KF2 once and quit, so Steam downloads it.",
-             "Hold the Windows key and press R. A small Run box opens.",
-             "Paste the line from this page into the box and press Enter.",
-             "Click OK. Steam closes and opens again by itself.",
+    steps = ["Click Subscribe. Press Play on Killing Floor 2 once, then quit (Steam downloads it).",
+             "In Steam: right-click Killing Floor 2 > Manage > Browse local files.",
+             "Click steamapps in the address bar, then open these folders in order:",
+             "Double-click Setup KF2VR, then click OK. Steam closes and opens again by itself.",
              "Press Play on Killing Floor 2 and pick Play in VR."]
     for i, words in enumerate(steps):
         y = top + i * step_h
         draw.rounded_rectangle((40, y, W - 40, y + step_h - 20), 16, fill=CARD)
         draw.ellipse((70, y + 52, 142, y + 124), fill=RED)
         draw.text((106, y + 88), str(i + 1), fill="white", font=font(40, True), anchor="mm")
-        draw.text((175, y + 30), words, fill=TEXT, font=font(30))
+        draw.text((175, y + 30), words, fill=TEXT, font=font(27))
         vy = y + 88
         if i == 0:
             button(draw, 175, vy, "+ Subscribe", GREEN)
         elif i == 1:
-            x = key(draw, 175, vy, "Windows key", 240)
-            draw.text((x + 30, vy + 30), "+", fill=TEXT, font=font(40, True), anchor="mm")
-            key(draw, x + 60, vy, "R", 80)
+            x = 175
+            for label in ("Killing Floor 2", "Manage", "Browse local files"):
+                w = 40 + int(draw.textlength(label, font=font(26, True)))
+                draw.rounded_rectangle((x, vy, x + w, vy + 60), 8, fill=(60, 60, 60))
+                draw.text((x + w / 2, vy + 30), label, fill="white", font=font(26, True), anchor="mm")
+                x += w
+                if label != "Browse local files":
+                    draw.text((x + 22, vy + 30), ">", fill=TEXT, font=font(34, True), anchor="mm"); x += 44
         elif i == 2:
-            draw.rectangle((175, vy - 4, 975, vy + 64), fill=(240, 240, 240), outline=(90, 90, 90), width=2)
-            draw.text((185, vy + 30), "Open:", fill=(20, 20, 20), font=font(24), anchor="lm")
-            draw.rectangle((265, vy + 8, 960, vy + 52), fill="white", outline=(0, 120, 215), width=2)
-            draw.text((275, vy + 30), "powershell -ep bypass -c irm https://raw...KF2VR-Setup.ps1|iex",
-                      fill=(20, 20, 20), font=font(20), anchor="lm")
-            key(draw, 1010, vy, "Enter", 150)
+            draw.rectangle((175, vy, 1215, vy + 60), fill=(240, 240, 240), outline=(90, 90, 90), width=2)
+            parts = [("...", False), ("steamapps", True), ("workshop", False), ("content", False),
+                     ("232090", False), ("3817663661", False)]
+            x = 190
+            for k, (label, hot) in enumerate(parts):
+                f = font(24, True)
+                w = int(draw.textlength(label, font=f))
+                if hot:
+                    draw.rounded_rectangle((x - 8, vy + 10, x + w + 8, vy + 50), 6, fill=(204, 228, 247), outline=(0, 120, 215), width=2)
+                draw.text((x, vy + 30), label, fill=(20, 20, 20), font=f, anchor="lm")
+                x += w + 14
+                if k < len(parts) - 1:
+                    draw.text((x + 4, vy + 30), ">", fill=(90, 90, 90), font=font(24, True), anchor="mm"); x += 24
         elif i == 3:
-            button(draw, 175, vy, "OK", (0, 103, 192), 160)
+            draw.rounded_rectangle((175, vy - 4, 205, vy + 60), 4, fill=(220, 220, 220))
+            draw.rectangle((180, vy + 8, 200, vy + 14), fill=(60, 60, 60))
+            draw.text((225, vy + 28), "Setup KF2VR", fill=TEXT, font=font(30, True), anchor="lm")
+            draw.text((440, vy + 28), "(double-click)", fill=DIM, font=font(26), anchor="lm")
+            button(draw, 660, vy, "OK", (0, 103, 192), 160)
         else:
             button(draw, 175, vy, "Play in VR (KF2-VR)", RED, 330)
             button(draw, 525, vy, "Play normally", (60, 60, 60), 260)
-    draw.text((W / 2, H - 30), "To undo it, run the same line again.", fill=DIM, font=font(26), anchor="mm")
+    draw.text((W / 2, H - 30), "To undo it, double-click Setup KF2VR again.", fill=DIM, font=font(26), anchor="mm")
     OUT.parent.mkdir(parents=True, exist_ok=True)
     image.save(OUT, optimize=True)
     print(OUT, OUT.stat().st_size)
