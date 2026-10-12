@@ -96,6 +96,9 @@ def parse_mods(value):
 # The mod's own Steam Workshop item (KF2VR, KF2VRNet, KF2VRNetClient and
 # KF2VRHands), offered by a host so desktop players without the release can join.
 KF2VR_WORKSHOP_ID = "3815925510"
+# The full mod (launcher, runtime and packages) for players who want VR.
+KF2VR_FULL_WORKSHOP_ID = "3817663661"
+KF2VR_FULL_WORKSHOP_URL = "https://steamcommunity.com/sharedfiles/filedetails/?id=" + KF2VR_FULL_WORKSHOP_ID
 DLSS_MODES = ("off", "dlaa", "quality", "balanced", "performance", "ultraperformance")
 
 

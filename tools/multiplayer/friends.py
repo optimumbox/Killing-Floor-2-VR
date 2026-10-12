@@ -29,7 +29,8 @@ from workshop_map import MAP_NAME, ensure_map, add_map_path, receipt as map_rece
 from launch_menu import (DIFFICULTIES, LENGTHS, host_url, installed_maps,
                          installed_solo_maps, resolve_solo_map, choose_options)
 from workshop_loadout import (parse_mods, load_preferences, save_preferences, save_dlss_preferences, prepare_content,
-                              configure_content, configure_mod_settings, damage_popups_enabled, HEADSET_PRESETS)
+                              configure_content, configure_mod_settings, damage_popups_enabled, HEADSET_PRESETS,
+                              KF2VR_FULL_WORKSHOP_URL)
 from session import digest, config_hashes, role_config, set_ini, read_ini, log_text, unreal_command, check_port
 from watchdog import api, creation_time
 from evidence import events
@@ -214,6 +215,11 @@ def disable_mouse_look(text):
 
 
 DEFAULT_SERVER_NAME = "KF2-VR Server"
+# KF2's welcome screen, shown to everyone who joins: how a desktop player can
+# play in VR too, with its Website button opening the full mod's Workshop page.
+WELCOME_MOTD = ("Welcome to a KF2-VR server!@nl@@nl@Want to play in VR? Press the Website button, "
+                "subscribe to KF2VR, and follow the one-minute setup on that page.@nl@@nl@"
+                "Playing on a normal screen works as usual.")
 SERVER_NAME_PATTERN = r"[A-Za-z0-9 .,'!&()+_-]{1,48}"
 
 
@@ -389,6 +395,8 @@ def configure_role(run, name, user, game, args):
         # desktop players keep stock weapons; VR owners opt in via tracking.
         text = set_ini(text, "Engine.GameReplicationInfo", {
             "ServerName": getattr(args, "server_name", None) or DEFAULT_SERVER_NAME})
+        text = set_ini(text, "KFGame.KFGameInfo", {"ServerMOTD": WELCOME_MOTD,
+                                                     "WebsiteLink": KF2VR_FULL_WORKSHOP_URL})
         text = set_ini(text, "KF2VRNet.KF2VRNetGame", {
             "bServerAdapter": "true", "bIndependentWeapons": "false" if replay and not locomotion else "true",
             "bInventoryFocusEnabled": "true" if getattr(args, "inventory_focus", False) else "false",

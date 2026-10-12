@@ -13,7 +13,7 @@
 
 $ErrorActionPreference = 'Stop'
 $ItemId = '3817663661'
-$ItemFolder = 'KF2VR-Prototype'
+$ItemFolder = 'KF2VR'
 $AppId = '232090'
 $Title = 'KF2-VR setup'
 $Test = [bool]$env:KF2VR_TEST_CONFIG
@@ -132,7 +132,10 @@ else {
 }
 
 $option = "`"$play`" %command%"
-$installed = @($configs | Where-Object { (Get-LaunchOptions ([IO.File]::ReadAllText($_.FullName))) -like '*Play.cmd*%command%*' }).Count -gt 0
+# Already pointing here: offer to take it off. Pointing at an older copy of
+# the item (a renamed folder): just repoint it.
+$current = @($configs | ForEach-Object { Get-LaunchOptions ([IO.File]::ReadAllText($_.FullName)) })
+$installed = @($current | Where-Object { $_ -eq $option }).Count -gt 0
 if ($installed) {
     $answer = Say ("KF2-VR is already set up on Killing Floor 2's Play button.`n`n" +
                    "Remove it, so Play starts plain Killing Floor 2 again?") 'YesNo'

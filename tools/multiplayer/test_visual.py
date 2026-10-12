@@ -68,6 +68,8 @@ class VisualRolesTests(unittest.TestCase):
             self.assertIn("Paths=stock", engine)
             self.assertNotIn("[Engine.AccessControl]", engine)
             self.assertIn("ServerName=Test Server", game)
+            self.assertIn("ServerMOTD=Welcome to a KF2-VR server!", game)
+            self.assertIn("WebsiteLink=https://steamcommunity.com/sharedfiles/filedetails/?id=", game)
             self.assertIn("GamePassword=visual-test", game)
 
     def settings(self, role):
