@@ -674,10 +674,10 @@ class Launcher(tk.Tk):
                             variable=extras["threaded"]).pack(anchor="w", pady=(self.px(4), 0))
             self.label(frame, "OFF: portal see-through views. ON: flat portal fill; may improve frame rate.",
                        "small", DIM, wraplength=self.px(600)).pack(anchor="w")
-            extras["hbao"] = tk.BooleanVar(value=bool(getattr(self.saved, "hbao", False)))
+            extras["hbao"] = tk.BooleanVar(value=getattr(self.saved, "hbao", True) is not False)
             ttk.Checkbutton(frame, text="HBAO+ ambient occlusion",
                             variable=extras["hbao"]).pack(anchor="w", pady=(self.px(4), 0))
-            extras["reflections"] = tk.BooleanVar(value=bool(getattr(self.saved, "reflections", False)))
+            extras["reflections"] = tk.BooleanVar(value=getattr(self.saved, "reflections", True) is not False)
             ttk.Checkbutton(frame, text="Screen-space reflections",
                             variable=extras["reflections"]).pack(anchor="w")
             extras["single_pass"] = tk.BooleanVar(value=bool(getattr(self.saved, "single_pass", False)))

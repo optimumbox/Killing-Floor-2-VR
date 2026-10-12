@@ -595,9 +595,9 @@ def parse_options(argv=None):
     parser.add_argument("--dlss-sharpness", type=int, default=None,
                         help="Sharpening after DLSS, 0 (off) to 100 (saved, initially 0)")
     parser.add_argument("--hbao", action=argparse.BooleanOptionalAction, default=None,
-                        help="HBAO+ ambient occlusion (saved, initially off); VR")
+                        help="HBAO+ ambient occlusion (saved, initially on); VR")
     parser.add_argument("--reflections", action=argparse.BooleanOptionalAction, default=None,
-                        help="Screen-space reflections (saved, initially off); VR")
+                        help="Screen-space reflections (saved, initially on); VR")
     parser.add_argument("--server-name", help="Host: name shown in the server browser (saved; initially "
                         + DEFAULT_SERVER_NAME + ")")
     parser.add_argument("--open-server", action=argparse.BooleanOptionalAction, default=None,
